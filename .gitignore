@@ -1,0 +1,54 @@
+# ===== OS =====
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# ===== 환경 변수 / 비밀 정보 =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# ===== Python / Django =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+db.sqlite3
+media/
+staticfiles/
+
+# ===== Node / Frontend =====
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== Logs / Coverage =====
+logs/
+*.log
+coverage/
+.coverage
+htmlcov/

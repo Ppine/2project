@@ -1,0 +1,75 @@
+﻿서비스,요금제,가격,통화,결제주기,비고,출처
+Netflix,광고형 스탠다드,7000,KRW,월,일반 웹 요금 기준; 제휴·앱 결제 별도 확인,https://streampick.io/plans/
+Netflix,스탠다드,13500,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Netflix,프리미엄,17000,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+TVING,광고형 스탠다드,5500,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+TVING,베이직,9500,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+TVING,스탠다드,13500,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+TVING,프리미엄,17000,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Wavve,광고형 스탠다드,5500,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Wavve,베이직,7900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Wavve,스탠다드,10900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Wavve,프리미엄,13900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Disney+,스탠다드,9900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Disney+,프리미엄,13900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+WATCHA,베이직,7900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+WATCHA,프리미엄,12900,KRW,월,일반 웹 요금 기준,https://streampick.io/plans/
+Coupang Wow,와우 멤버십(쿠팡플레이 포함),7890,KRW,월,쇼핑·배달·OTT 번들,https://news.coupang.com/archives/38866/
+Apple TV+,개인,6500,KRW,월,,https://kott.kr/ott-price-comparison
+YouTube Premium,프리미엄(웹/Android),14900,KRW,월,iOS 앱 결제 가격은 다를 수 있음,https://blog.youtube/intl/ko-kr/news-and-events/yt-premium-lite-kr/
+YouTube Premium,프리미엄 라이트(웹/Android),8500,KRW,월,음악 프리미엄 제외,https://blog.youtube/intl/ko-kr/news-and-events/yt-premium-lite-kr/
+YouTube Music,뮤직 프리미엄(웹/Android),11990,KRW,월,,https://blog.youtube/intl/ko-kr/news-and-events/yt-premium-lite-kr/
+Spotify,Premium 베이직,8690,KRW,월,다운로드 미포함,https://www.spotify.com/kr-ko/premium/
+Spotify,Premium 개인,11990,KRW,월,,https://www.spotify.com/kr-ko/premium/
+Spotify,Premium 듀오,17985,KRW,월,동일 주소 거주 2인,https://www.spotify.com/kr-ko/premium/
+Spotify,Premium 학생,6600,KRW,월,자격·학교 인증 필요,https://www.spotify.com/kr-ko/premium/
+Apple Music,개인,8900,KRW,월,,https://www.apple.com/kr/apple-music/
+Apple Music,가족,13500,KRW,월,가족 공유,https://www.apple.com/kr/apple-music/
+Naver Plus Membership,월간,4900,KRW,월,기본 디지털 콘텐츠 1종 선택; 추가 콘텐츠 별도 과금,https://help.naver.com/service/23168/contents/11764?lang=ko&osType=COMMONOS
+Naver Plus Membership,연간,46800,KRW,년,연간 선결제; 월 환산 3900원,https://help.naver.com/service/23168/contents/11764?lang=ko&osType=COMMONOS
+Kakao Membership,통합 멤버십,4900,KRW,월,이모티콘 플러스 또는 톡클라우드 130GB 등 월 선택 혜택; 가입 가능 여부 확인,https://www.news1.kr/it-science/internet-platform/6307096
+Kakao Emoticon Plus,웹 구독,3900,KRW,월,카카오 My구독 웹 가격; 앱 경로 별도,https://my.kakao.com/product/EMOTICON001
+Kakao Emoticon Plus,Android 앱 구독,5700,KRW,월,앱 가격은 계정 결제 화면에서 확인,https://pickle.plus/blog/kakao-emoticon-prices
+Kakao Emoticon Plus,iOS 앱 구독,6900,KRW,월,앱 가격은 계정 결제 화면에서 확인,https://pickle.plus/blog/kakao-emoticon-prices
+Baemin Club,에디션 2,3990,KRW,월,2026년 10월 신규 상품 보도 기준,https://m.mk.co.kr/amp/12166144
+Baemin Club,기존 상품(기존 가입자 유지가),1990,KRW,월,기존 가입자 조건; 신규 가입 불가 여부 확인,https://m.mk.co.kr/amp/12166144
+Baemin Club,연간 이용권,23880,KRW,년,연간 선결제 보도 가격; 판매 가능 여부 확인,https://www.etnews.com/20260226000295
+iCloud+,50GB,1100,KRW,월,,https://support.apple.com/ko-kr/108047
+iCloud+,200GB,4400,KRW,월,,https://support.apple.com/ko-kr/108047
+iCloud+,2TB,14000,KRW,월,,https://support.apple.com/ko-kr/108047
+iCloud+,6TB,44000,KRW,월,,https://support.apple.com/ko-kr/108047
+iCloud+,12TB,88000,KRW,월,,https://support.apple.com/ko-kr/108047
+Kakao Talk Cloud,30GB,2100,KRW,월,톡클라우드; 구 톡서랍 플러스와 구상품 별도 관리,https://my.kakao.com/product/DRIVE001
+Kakao Talk Cloud,50GB,3100,KRW,월,웹 상품 페이지 기준,https://my.kakao.com/product/DRIVE001
+Kakao Talk Cloud,200GB,5100,KRW,월,웹 상품 페이지 기준,https://my.kakao.com/product/DRIVE001
+Kakao Talk Cloud,2TB,12000,KRW,월,웹 상품 페이지 기준; 앱스토어 가격 다를 수 있음,https://my.kakao.com/product/DRIVE001
+Google AI,AI Pro,29000,KRW,월,한국 공개 가격 보도 기준; 가입 화면 확인,https://one.google.com/intl/ko_kr/about/google-ai-plans/
+Google AI,AI Ultra,119000,KRW,월,"한국 공개 가격 보도 기준, 시작 가격",https://www3.edaily.co.kr/News/Read?mediaCodeNo=257&newsId=01088966645609968
+Microsoft 365,Personal,12500,KRW,월,연간 결제는 125000원/년,https://www.microsoft.com/ko-kr/microsoft-365/personal-family
+Microsoft 365,Family,15500,KRW,월,연간 결제는 155000원/년,https://www.microsoft.com/ko-kr/microsoft-365/personal-family
+ChatGPT,Go,8,USD,월,미국 기준 공개 가격; 한국 현지 가격은 가입 화면 확인,https://openai.com/ko-KR/index/introducing-chatgpt-go/
+ChatGPT,Plus,20,USD,월,미국 기준; API 별도,https://help.openai.com/ko-kr/articles/6950777-what-is-chatgpt-plus
+ChatGPT,Pro,200,USD,월,미국 기준; API 별도,https://openai.com/ko-KR/index/introducing-chatgpt-go/
+Claude,Pro 월 결제,20,USD,월,세금 별도 표시; 한국 최종 청구액 달라질 수 있음,https://www.anthropic.com/pricing
+Claude,Pro 연간,200,USD,년,선불; 월 환산 약 16.67 USD,https://www.anthropic.com/pricing
+Claude,Max 5x,100,USD,월,세금 별도 표시,https://www.anthropic.com/pricing
+Claude,Max 20x,200,USD,월,세금 별도 표시,https://www.anthropic.com/pricing
+Perplexity,Pro 웹 결제,20,USD,월,한국 App Store 표시가는 33000원으로 관측; 경로 분리,https://www.perplexity.ai/ko/hub/pricing
+Perplexity,Pro 한국 App Store,33000,KRW,월,App Store 표시가,https://apps.apple.com/kr/app/perplexity-%EB%AC%B4%EC%97%87%EC%9D%B4%EB%93%A0-%EB%AC%BC%EC%96%B4%EB%B3%B4%EC%84%B8%EC%9A%94/id1668000334
+Perplexity,Max,200,USD,월,,https://www.perplexity.ai/ko/hub/pricing
+Grok,SuperGrok,30,USD,월,,https://x.ai/pricing
+Grok,SuperGrok Plus,100,USD,월,,https://x.ai/pricing
+Adobe,Lightroom,13200,KRW,월,"연간 구독, 월별 청구",https://www.adobe.com/kr/creativecloud/pro/plans.html
+Adobe,Photoshop 단일 앱,30800,KRW,월,"연간 구독, 월별 청구",https://www.adobe.com/kr/products/photoshop/plans.html
+Adobe,포토그래피 플랜,26400,KRW,월,"Photoshop + Lightroom; 연간 구독, 월별 청구",https://www.adobe.com/kr/products/photoshop/plans.html
+Adobe,Premiere 단일 앱,30800,KRW,월,"연간 구독, 월별 청구",https://www.adobe.com/kr/products/premiere/plans.html
+Adobe,Creative Cloud 모든 앱,78100,KRW,월,정가; 할인·약정 별도,https://www.adobe.com/kr/creativecloud/plans.html
+Adobe Acrobat,Standard 연간 약정,17600,KRW,월,"연간 약정, 매월 청구",https://www.adobe.com/kr/acrobat/pricing.html
+Adobe Acrobat,Standard 월간,30800,KRW,월,월간 플랜,https://www.adobe.com/kr/acrobat/pricing.html
+Adobe Acrobat,Pro 연간 약정,26400,KRW,월,"연간 약정, 매월 청구",https://www.adobe.com/kr/acrobat/pricing.html
+Adobe Acrobat,Pro 월간,39600,KRW,월,월간 플랜,https://www.adobe.com/kr/acrobat/pricing.html
+Adobe Acrobat,Studio,33000,KRW,월,"연간 약정, 매월 청구",https://www.adobe.com/kr/acrobat/pricing.html
+Canva,Pro,9900,KRW,월,2026-10-16 공개 가격 관측; 계정·결제 경로 재확인,https://beomtachi.com/canva/pricing/
+CapCut,Standard,9900,KRW,월,한국 앱 내 가격 관측; 변동 가능,https://www.capcut.com/help/how-much-does-capcut-pro-cost
+CapCut,Pro,19800,KRW,월,한국 App Store 가격 관측; 지역·기기·프로모션별 상이,https://www.capcut.com/help/how-much-does-capcut-pro-cost
+DaVinci Resolve Studio,Studio 라이선스,509800,KRW,일회성,구독이 아닌 일회성 구매,https://www.blackmagicdesign.com/kr/products/davinciresolve/studio

@@ -60,3 +60,59 @@ MCP 도구(예시, 확정 전): `list_subscriptions`, `explain_charge`, `find_le
 ## 기획 문서
 
 전체 기획안: [docs/planning.md](docs/planning.md)
+
+확장 기능 검토안: [안드로이드 자동 해지 구현 방안](docs/auto-cancellation.md) — 딥링크·화면 자동화·리버스 엔지니어링 활용과 단계별 개발 범위. 기존 분석 MVP와 별도로 검토합니다.
+
+## 실행 방법
+
+필요: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+
+
+```bash
+# 1. 백엔드
+uv venv .venv && uv pip install -p .venv -r requirements.txt
+cp .env.example .env                      # 필요하면 ANTHROPIC_API_KEY 입력
+cd backend
+../.venv/bin/python manage.py migrate
+../.venv/bin/python manage.py load_service_fees   # docs/service fee modified.csv → DB
+../.venv/bin/python manage.py runserver           # http://127.0.0.1:8000
+
+# 2. 프론트 (새 터미널)
+cd frontend && npm install && npm run dev         # http://localhost:5173
+```
+
+웹 대시보드에서 `data/demo_card_2026.csv`를 올리고 "분석하기"를 누르면 구독 목록이 나옵니다.
+데모 데이터는 `python data/generate_demo.py`로 다시 만들 수 있습니다 (정답 라벨: `data/demo_labels.csv`).
+
+### AI 에이전트 연결 (MCP)
+
+```bash
+cd backend && ../.venv/bin/python manage.py issue_token claude-desktop   # 토큰은 이때 한 번만 출력됨
+```
+
+Claude Desktop의 `claude_desktop_config.json`에 추가 (경로는 본인 환경에 맞게):
+
+```json
+{
+  "mcpServers": {
+    "saedon": {
+      "command": "/절대경로/2project/.venv/bin/python",
+      "args": ["/절대경로/2project/mcp_server/server.py"],
+      "env": {
+        "SAEDON_API_URL": "http://127.0.0.1:8000/api",
+        "SAEDON_TOKEN": "발급받은 토큰"
+      }
+    }
+  }
+}
+```
+
+| MCP 도구 | 역할 |
+| --- | --- |
+| `list_subscriptions()` | 구독 목록, 월 합계, 다음 결제일 |
+| `explain_charge(merchant, amount)` | 결제 한 건의 실제 서비스 후보 + 신뢰도 + 근거 |
+
+### 테스트
+
+```bash
+cd backend && ../.venv/bin/pytest
+```

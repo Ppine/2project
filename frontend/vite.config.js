@@ -5,8 +5,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true, // 같은 Wi-Fi 의 폰에서 http://<PC IP>:5173 으로 접속
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

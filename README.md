@@ -60,3 +60,5 @@ MCP 도구(예시, 확정 전): `list_subscriptions`, `explain_charge`, `find_le
 ## 기획 문서
 
 전체 기획안: [docs/planning.md](docs/planning.md)
+
+확장 기능 검토안: [안드로이드 자동 해지 구현 방안](docs/auto-cancellation.md) — 딥링크·화면 자동화·리버스 엔지니어링 활용과 단계별 개발 범위. 기존 분석 MVP와 별도로 검토합니다.

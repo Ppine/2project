@@ -1,6 +1,7 @@
 """반복 결제 탐지.
 
 1. (정제된 가맹점, 금액) 이 같은 거래를 묶고, 간격이 월(28~31일)·연(335~370일)로 일정하면 반복 구간으로 본다.
+   주기 사이에 끼어든 같은 금액의 일회성 결제는 반복 구간에서 빼되, 반복 결제보다 훨씬 적을 때만 허용한다.
 2. 직접 결제 가맹점은 같은 가맹점의 반복 구간이 이어지면 하나의 구독으로 합친다 (요금 인상·요금제 변경).
    PG사·앱마켓은 한 가맹점 표기 아래 여러 서비스가 섞이므로 합치지 않는다.
 
@@ -21,6 +22,7 @@ CYCLES = {
     "yearly": (335, 370),
 }
 MIN_CHARGES = 2
+MAX_EXTRA_RATIO = 3  # 반복 결제 3건당 끼어든 결제 1건까지
 
 
 @dataclass
@@ -63,11 +65,36 @@ def detect_subscriptions(transactions: list[Transaction]) -> list[Recurring]:
     segments = []
     for txs in groups.values():
         txs.sort(key=lambda t: t.date)
-        cycle = cycle_of(txs)
-        if cycle:
-            segments.append(Recurring(describe_merchant(txs[0].merchant), txs[-1].merchant, cycle, txs))
+        found = find_cycle(txs)
+        if found:
+            cycle, charges = found
+            segments.append(Recurring(describe_merchant(charges[0].merchant), charges[-1].merchant, cycle, charges))
 
     return sorted(_merge_price_changes(segments), key=lambda r: r.charges[0].date)
+
+
+def find_cycle(txs: list[Transaction]) -> tuple[str, list[Transaction]] | None:
+    """정렬된 거래에서 일정한 주기로 이어지는 가장 긴 결제 사슬과 그 주기.
+
+    예: 매월 26일 결제 사이의 29일 결제 한 건은 사슬에서 빠진다. 끼어든 결제가 많으면(매일 사는 커피처럼)
+    우연히 한 달 간격인 두 건을 구독으로 오인하지 않도록 None.
+    """
+    for cycle, (low, high) in CYCLES.items():
+        best: list[Transaction] = []
+        for start in range(len(txs)):
+            chain = [txs[start]]
+            for tx in txs[start + 1:]:
+                gap = (tx.date - chain[-1].date).days
+                if low <= gap <= high:
+                    chain.append(tx)
+                elif gap > high:
+                    break
+            if len(chain) > len(best):
+                best = chain
+        extras = len(txs) - len(best)
+        if len(best) >= MIN_CHARGES and extras * MAX_EXTRA_RATIO <= len(best):
+            return cycle, best
+    return None
 
 
 def cycle_of(txs: list[Transaction]) -> str | None:

@@ -30,7 +30,10 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+# 폰 앱이 같은 Wi-Fi 에서 직접 붙을 때 PC 의 IP 를 추가한다. 예: DJANGO_ALLOWED_HOSTS=192.168.0.12
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "10.0.2.2"] + [
+    h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()
+]
 
 
 # Application definition

@@ -63,20 +63,26 @@ function App() {
         )}
       </section>
 
-      {result && <Subscriptions result={result} />}
+      {result && <Subscriptions result={result} onResult={setResult} />}
     </main>
   )
 }
 
-function Subscriptions({ result }) {
-  const { subscriptions, monthly_total: total, statement } = result
+const CANCEL_LABELS = {
+  web: '해지하기',
+  google_play: 'Google Play에서 해지',
+  app_store: 'App Store에서 해지',
+}
+
+function Subscriptions({ result, onResult }) {
+  const { subscriptions, monthly_total: total, transactions } = result
   return (
     <>
       <section className="card total">
         <span>월 구독 합계</span>
         <strong>{won(total)}</strong>
         <small>
-          구독 {subscriptions.length}건 · 거래 {statement.transactions}건 분석
+          구독 {subscriptions.length}건 · 거래 {transactions}건 분석
         </small>
       </section>
 
@@ -85,43 +91,87 @@ function Subscriptions({ result }) {
         {subscriptions.length === 0 ? (
           <p>반복 결제를 찾지 못했어요.</p>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>서비스</th>
-                  <th className="num">금액</th>
-                  <th>주기</th>
-                  <th>다음 결제일</th>
-                  <th>신뢰도</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subscriptions.map((s) => (
-                  <tr key={`${s.merchant}-${s.amount}`}>
-                    <td>
-                      <div>{s.service}</div>
-                      <small>
-                        {s.service !== s.merchant && `명세서 표기: ${s.merchant}`}
-                        {s.confidence !== 'high' && s.candidates.length > 0 &&
-                          ` · 후보: ${s.candidates.map((c) => c.service).join(', ')}`}
-                        {s.price_history.length > 1 && ' · 금액 변경됨'}
-                      </small>
-                    </td>
-                    <td className="num">{won(s.amount)}</td>
-                    <td>{CYCLE_LABELS[s.cycle]}</td>
-                    <td>{s.next_payment_date}</td>
-                    <td>
-                      <span className={`badge ${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="subs">
+            {subscriptions.map((s) => (
+              <Subscription key={`${s.merchant}-${s.amount}`} sub={s} onResult={onResult} />
+            ))}
+          </ul>
         )}
       </section>
     </>
+  )
+}
+
+function Subscription({ sub, onResult }) {
+  const confirmed = sub.confidence === 'high'
+  const notes = [
+    sub.service !== sub.merchant && `명세서 표기: ${sub.merchant}`,
+    sub.price_history.length > 1 && '금액 변경됨',
+  ].filter(Boolean)
+
+  return (
+    <li className="sub">
+      <div className="sub-head">
+        <div>
+          <div className="sub-name">{sub.service}</div>
+          {notes.length > 0 && <small>{notes.join(' · ')}</small>}
+        </div>
+        <div className="sub-amount">
+          {won(sub.amount)}
+          <small>/{CYCLE_LABELS[sub.cycle]}</small>
+        </div>
+      </div>
+      <div className="sub-meta">
+        <span>다음 결제 {sub.next_payment_date}</span>
+        <span className={`badge ${sub.confidence}`}>신뢰도 {CONFIDENCE_LABELS[sub.confidence]}</span>
+      </div>
+      {confirmed ? (
+        sub.cancel && (
+          <a className="button secondary" href={sub.cancel.url} target="_blank" rel="noreferrer">
+            {CANCEL_LABELS[sub.cancel.via]}
+          </a>
+        )
+      ) : (
+        <ConfirmService sub={sub} onResult={onResult} />
+      )}
+    </li>
+  )
+}
+
+function ConfirmService({ sub, onResult }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  if (sub.candidates.length === 0) return <small>어떤 서비스인지 찾지 못했어요.</small>
+
+  async function confirm(service) {
+    setSaving(true)
+    setError('')
+    try {
+      const response = await fetch('/api/merchant-aliases/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ merchant: sub.merchant, amount: sub.amount, service }),
+      })
+      if (!response.ok) throw new Error()
+      onResult(await response.json())
+    } catch {
+      setError('저장하지 못했어요')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="confirm">
+      <small>어떤 서비스인가요? 확인하면 해지 방법을 알려드려요.</small>
+      <div className="chips">
+        {sub.candidates.map((c) => (
+          <button key={c.service} type="button" className="chip" disabled={saving} onClick={() => confirm(c.service)}>
+            {c.service}
+          </button>
+        ))}
+      </div>
+      {error && <small className="error">{error}</small>}
+    </div>
   )
 }
 

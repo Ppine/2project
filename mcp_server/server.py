@@ -24,9 +24,10 @@ server = MCPServer(
     name="saedon",
     title="새는 돈 찾기",
     instructions=(
-        "사용자의 카드 명세서에서 구독과 정체불명 결제를 조회하는 읽기 전용 도구다. "
+        "사용자의 카드 결제 내역(명세서·카드사 결제 알림)에서 구독과 정체불명 결제를 조회하는 읽기 전용 도구다. "
         "출처 추적 결과는 단정이 아니라 후보와 신뢰도(high/medium/low)이므로, "
-        "신뢰도가 high 가 아니면 사용자에게 확인을 구하라."
+        "신뢰도가 high 가 아니면 사용자에게 확인을 구하라. "
+        "해지를 원하면 구독의 cancel.url 을 안내하라. 이 도구로 해지를 실행하지는 않는다."
     ),
 )
 
@@ -55,7 +56,8 @@ def list_subscriptions() -> dict[str, Any]:
     """사용자가 구독 중인 서비스 목록과 월 합계를 돌려준다.
 
     각 구독: service, plan, amount(원), cycle(monthly/yearly), monthly_amount,
-    next_payment_date, confidence, candidates, evidence, price_history(금액 변동 이력).
+    next_payment_date, confidence, candidates, evidence, price_history(금액 변동 이력),
+    cancel(서비스가 확정된 구독의 해지 관리 화면: via=web/google_play/app_store, url. 미확정이면 null).
     monthly_total 은 모든 구독의 월 환산 합계(원)다.
     """
     return _get("/subscriptions/")

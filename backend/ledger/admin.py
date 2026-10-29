@@ -7,5 +7,5 @@ admin.site.register([Statement, Transaction, ServiceFee, MerchantAlias])
 
 @admin.register(AgentToken)
 class AgentTokenAdmin(admin.ModelAdmin):
-    list_display = ["name", "created_at", "revoked"]
+    list_display = ["name", "scope", "created_at", "revoked"]
     readonly_fields = ["token_hash"]

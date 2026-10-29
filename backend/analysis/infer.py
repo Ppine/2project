@@ -9,10 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .clean import describe_merchant, normalize_name
-from .detect import Recurring, cycle_of, detect_subscriptions
+from .detect import Recurring, detect_subscriptions, find_cycle
 from .parsers import Transaction
 
 CYCLE_LABELS = {"monthly": "매월", "yearly": "매년"}
+# 앱마켓 결제는 서비스 웹이 아니라 앱마켓 구독 관리 화면에서 해지한다.
+MARKET_CANCEL = {
+    "google": ("google_play", "https://play.google.com/store/account/subscriptions"),
+    "apple": ("app_store", "https://apps.apple.com/account/subscriptions"),
+}
 FEE_CYCLES = {"월": "monthly", "년": "yearly"}
 
 # 구독료 표에 없는 가맹점 표기 -> 서비스명
@@ -69,12 +74,17 @@ def fee_from_row(row: dict) -> Fee:
     )
 
 
-def identify(sub: Recurring, fees: list[Fee], aliases: dict[str, str] | None = None, llm=None) -> dict:
-    """반복 결제 한 건의 출처 후보."""
+def identify(sub: Recurring, fees: list[Fee], aliases: dict | None = None, llm=None) -> dict:
+    """반복 결제 한 건의 출처 후보.
+
+    aliases 키는 가맹점 전체(`"NICE페이"`) 또는 가맹점+금액(`("NICE페이", 9900)`).
+    PG사는 한 표기 아래 여러 서비스가 섞이므로 금액까지 맞는 매핑을 먼저 쓴다.
+    """
     merchant = sub.merchant
     count = f"{CYCLE_LABELS[sub.cycle]} {len(sub.charges)}회 결제"
 
-    service = (aliases or {}).get(merchant.cleaned)
+    aliases = aliases or {}
+    service = aliases.get((merchant.cleaned, sub.amount)) or aliases.get(merchant.cleaned)
     if service:
         return _result([_candidate(service, _plan_for(service, sub, fees), "high")], ["사용자가 확인한 매핑", count])
 
@@ -119,8 +129,8 @@ def explain_charge(
         return {**base, "found": False, "is_subscription": False, "confidence": "low", "candidates": [],
                 "evidence": ["명세서에서 해당 가맹점·금액의 결제를 찾지 못함"]}
 
-    cycle = cycle_of(matched)
-    if not cycle:
+    found = find_cycle(matched)
+    if not found:
         info = describe_merchant(matched[0].merchant)
         matches = _price_matches(amount, "monthly", info.channel, fees)
         evidence = [f"{len(matched)}회 결제 — 반복 결제가 아니어서 구독이 아닌 일반 결제로 보임"]
@@ -130,7 +140,8 @@ def explain_charge(
         return {**base, "found": True, "is_subscription": False, "confidence": "low",
                 "candidates": candidates, "evidence": evidence}
 
-    sub = Recurring(describe_merchant(matched[-1].merchant), matched[-1].merchant, cycle, matched)
+    cycle, charges = found
+    sub = Recurring(describe_merchant(charges[-1].merchant), charges[-1].merchant, cycle, charges)
     result = identify(sub, fees, aliases, llm)
     return {**base, "found": True, "is_subscription": True, "cycle": cycle,
             "next_payment_date": sub.next_date.isoformat(), **result}
@@ -142,24 +153,37 @@ def analyze(transactions: list[Transaction], fees: list[Fee], aliases=None, llm=
     for sub in detect_subscriptions(transactions):
         result = identify(sub, fees, aliases, llm)
         top = result["candidates"][0] if result["candidates"] else None
+        confirmed = top is not None and result["confidence"] == "high"
         subscriptions.append({
-            "service": top["service"] if top and result["confidence"] == "high" else sub.raw_merchant,
-            "plan": top["plan"] if top and result["confidence"] == "high" else None,
+            "service": top["service"] if confirmed else sub.raw_merchant,
+            "plan": top["plan"] if confirmed else None,
             "merchant": sub.raw_merchant,
             "amount": sub.amount,
             "cycle": sub.cycle,
             "monthly_amount": sub.monthly_amount,
             "next_payment_date": sub.next_date.isoformat(),
             "first_charge_date": sub.charges[0].date.isoformat(),
+            "last_charge_date": sub.last_date.isoformat(),
             "charge_count": len(sub.charges),
             "price_history": sub.price_history,
+            "cancel": cancel_info(top["service"], sub.merchant.channel, fees) if confirmed else None,
             **result,
         })
+    subscriptions.sort(key=lambda s: s["next_payment_date"])
     return {
         "subscriptions": subscriptions,
         "monthly_total": sum(s["monthly_amount"] for s in subscriptions),
         "currency": "KRW",
     }
+
+
+def cancel_info(service: str, channel: str | None, fees: list[Fee]) -> dict | None:
+    """해지 관리 화면. 서비스가 확정된 구독에만 준다 (후보만으로 해지 대상을 정하지 않는다)."""
+    if channel in MARKET_CANCEL:
+        via, url = MARKET_CANCEL[channel]
+        return {"via": via, "url": url}
+    url = next((f.cancel_url for f in fees if f.service == service and f.cancel_url), None)
+    return {"via": "web", "url": url} if url else None
 
 
 def _same_merchant(target: str, raw: str) -> bool:

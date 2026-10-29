@@ -1,5 +1,5 @@
 import csv
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -153,3 +153,48 @@ def test_llm_used_only_when_rules_fail(fees):
     result = analyze(txs, fees, llm=fake_llm)
     assert calls == ["KCP 알수없는상점"]
     assert result["subscriptions"][0]["candidates"][0]["service"] == "Mystery"
+
+
+def test_alias_for_amount_only(demo_transactions, fees):
+    aliases = {("NICE페이", 9900): "Disney+", ("NICE페이", 1): "Other"}
+    result = explain_charge("NICE페이", 9900, demo_transactions, fees, aliases=aliases)
+    assert result["candidates"][0]["service"] == "Disney+"
+
+
+# --- 해지 안내 ---
+
+
+def test_cancel_info_by_payment_channel(demo_transactions, fees):
+    subs = {s["service"]: s for s in analyze(demo_transactions, fees)["subscriptions"]}
+    assert subs["Speak"]["cancel"]["via"] == "google_play"
+    assert subs["iCloud+"]["cancel"]["via"] == "app_store"
+    assert subs["Netflix"]["cancel"] == {"via": "web", "url": "https://help.netflix.com/en/node/407"}
+
+
+def test_no_cancel_until_service_confirmed(demo_transactions, fees):
+    nice = next(s for s in analyze(demo_transactions, fees)["subscriptions"] if s["merchant"] == "NICE페이")
+    assert nice["confidence"] == "medium"
+    assert nice["cancel"] is None
+
+
+def test_subscriptions_sorted_by_next_payment(demo_transactions, fees):
+    dates = [s["next_payment_date"] for s in analyze(demo_transactions, fees)["subscriptions"]]
+    assert dates == sorted(dates)
+
+
+# --- 주기 밖 결제 ---
+
+
+def test_extra_charge_does_not_break_subscription():
+    txs = [Transaction(date(2026, m, 26), "NICE페이", 9900) for m in range(5, 11)]
+    txs.append(Transaction(date(2026, 10, 29), "NICE페이", 9900))
+    [sub] = detect_subscriptions(txs)
+    assert sub.cycle == "monthly"
+    assert len(sub.charges) == 6
+    assert sub.next_date == date(2026, 11, 26)
+
+
+def test_frequent_same_price_purchases_are_not_subscription():
+    """매일 같은 가격의 커피 중 한 달 간격인 두 잔을 구독으로 오인하지 않는다."""
+    txs = [Transaction(date(2026, 5, 1) + timedelta(days=d), "스타벅스", 4500) for d in range(45)]
+    assert detect_subscriptions(txs) == []

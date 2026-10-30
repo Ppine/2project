@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <clipPath id="body-shape">
+      <path d="M30 75c-8 4-14 0-12-7 1-4 6-8 11-10-3-13-1-29 6-41C43 5 58 2 73 5c18 0 31 11 35 27 4 8 4 18 7 26 6 4 9 10 5 15-3 5-9 5-15 2 0 0 9 10 3 19-7 10-23 15-39 16-7 0-10-5-7-12l3-7c-5 2-8 8-12 13-4 5-10 4-18 1-12-4-20-11-22-20-2-5 1-9 9-10Z"/>
+    </clipPath>
+  </defs>
+  <ellipse cx="64" cy="117" rx="35" ry="4" fill="#49313A" opacity=".10"/>
+  <!-- Reference-inspired rounded yellow and pink potato -->
+  <path d="M30 75c-8 4-14 0-12-7 1-4 6-8 11-10-3-13-1-29 6-41C43 5 58 2 73 5c18 0 31 11 35 27 4 8 4 18 7 26 6 4 9 10 5 15-3 5-9 5-15 2 0 0 9 10 3 19-7 10-23 15-39 16-7 0-10-5-7-12l3-7c-5 2-8 8-12 13-4 5-10 4-18 1-12-4-20-11-22-20-2-5 1-9 9-10Z" fill="#FFD34F"/>
+  <g clip-path="url(#body-shape)">
+    <path d="M10 74c19-8 31-1 49 0 21 1 37-9 62-4v62H10z" fill="#C979A5"/>
+  </g>
+  <path d="M30 75c-8 4-14 0-12-7 1-4 6-8 11-10-3-13-1-29 6-41C43 5 58 2 73 5c18 0 31 11 35 27 4 8 4 18 7 26 6 4 9 10 5 15-3 5-9 5-15 2 0 0 9 10 3 19-7 10-23 15-39 16-7 0-10-5-7-12l3-7c-5 2-8 8-12 13-4 5-10 4-18 1-12-4-20-11-22-20-2-5 1-9 9-10Z" stroke="#49313A" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Arms and oversized green bills stay in front so the pose reads at logo size -->
+  <path d="M40 68Q32 58 25 45m63 23q8-10 15-23" stroke="#49313A" stroke-width="5.5" stroke-linecap="round"/>
+  <g transform="rotate(-14 22 35)">
+    <rect x="7" y="25" width="29" height="20" rx="3" fill="#80C98B" stroke="#49313A" stroke-width="3.2"/>
+    <rect x="10" y="28" width="23" height="14" rx="2" stroke="#4F9660" stroke-width="1.8"/>
+    <circle cx="21.5" cy="35" r="3.2" fill="#B9E4A9" stroke="#4F9660" stroke-width="1.4"/>
+  </g>
+  <g transform="rotate(14 106 35)">
+    <rect x="92" y="25" width="29" height="20" rx="3" fill="#80C98B" stroke="#49313A" stroke-width="3.2"/>
+    <rect x="95" y="28" width="23" height="14" rx="2" stroke="#4F9660" stroke-width="1.8"/>
+    <circle cx="106.5" cy="35" r="3.2" fill="#B9E4A9" stroke="#4F9660" stroke-width="1.4"/>
+  </g>
+  <circle cx="25" cy="45" r="4" fill="#FFD34F" stroke="#49313A" stroke-width="2.5"/>
+  <circle cx="103" cy="45" r="4" fill="#FFD34F" stroke="#49313A" stroke-width="2.5"/>
+  <circle cx="52" cy="55" r="2.8" fill="#49313A"/>
+  <circle cx="77" cy="55" r="2.8" fill="#49313A"/>
+  <path d="M62 63c3 3 7 3 10 0" stroke="#49313A" stroke-width="3.2" stroke-linecap="round"/>
+</svg>

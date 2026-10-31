@@ -154,23 +154,29 @@ function App() {
   );
   const [connecting, setConnecting] = useState(false);
   const [connectStep, setConnectStep] = useState(0);
+  const [sourceName, setSourceName] = useState("demo_card_2026.csv");
+
+  async function postStatement(file) {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch("/api/statements/", {
+      method: "POST",
+      body,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok)
+      throw new Error(data.detail ?? "명세서를 분석하지 못했어요.");
+    return data;
+  }
 
   async function loadDemo() {
     setLoading(true);
     setError("");
+    setSourceName("demo_card_2026.csv");
     try {
-      const body = new FormData();
-      body.append(
-        "file",
+      const data = await postStatement(
         new File([demoCsv], "demo_card_2026.csv", { type: "text/csv" }),
       );
-      const response = await fetch("/api/statements/", {
-        method: "POST",
-        body,
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.detail ?? "데모 데이터를 불러오지 못했어요.");
       setOfflineDemo(false);
       setResult(data);
     } catch (e) {
@@ -178,6 +184,27 @@ function App() {
       setOfflineDemo(true);
       setResult(LOCAL_DEMO);
       setError("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadStatement(file) {
+    if (!file) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = await postStatement(file);
+      setOfflineDemo(false);
+      setSourceName(file.name);
+      setResult(data);
+    } catch (e) {
+      // 직접 올린 파일은 로컬 데모로 대체하지 않고 실패 이유를 보여줍니다.
+      setError(
+        e instanceof TypeError
+          ? "백엔드에 연결하지 못했어요. 서버가 켜져 있는지 확인해 주세요."
+          : e.message,
+      );
     } finally {
       setLoading(false);
     }
@@ -305,14 +332,30 @@ function App() {
                   alt="돈구마가 호미로 땅을 파서 동전과 지폐를 발견하고 기뻐하는 모습"
                 />
               </div>
-              <button
-                className="refresh-button"
-                type="button"
-                onClick={loadDemo}
-                disabled={loading}
-              >
-                <span className={loading ? "spin" : ""}>↻</span> 데모 다시 찾기
-              </button>
+              <div className="hero-actions">
+                <label
+                  className={`refresh-button upload-button${loading ? " disabled" : ""}`}
+                >
+                  <input
+                    type="file"
+                    accept=".csv"
+                    disabled={loading}
+                    onChange={(e) => {
+                      uploadStatement(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                  <span>⇪</span> 내 명세서 올리기
+                </label>
+                <button
+                  className="refresh-button"
+                  type="button"
+                  onClick={loadDemo}
+                  disabled={loading}
+                >
+                  <span className={loading ? "spin" : ""}>↻</span> 데모 다시 찾기
+                </button>
+              </div>
             </div>
           </section>
 
@@ -330,7 +373,7 @@ function App() {
               <b>데이터를 불러오지 못했어요</b>
               <span>{error}</span>
               <button type="button" onClick={loadDemo}>
-                다시 시도
+                데모 데이터 보기
               </button>
             </div>
           )}
@@ -451,8 +494,17 @@ function App() {
                   )}
                 </section>
                 <footer className="page-footer">
-                  <span className="footer-lock">⌑</span> 실제 금융 정보가 아닌{" "}
-                  <b>demo_card_2026.csv</b> 가상 결제 내역을 분석한 데모예요.
+                  <span className="footer-lock">⌑</span>{" "}
+                  {sourceName === "demo_card_2026.csv" ? (
+                    <>
+                      실제 금융 정보가 아닌 <b>demo_card_2026.csv</b> 가상 결제
+                      내역을 분석한 데모예요.
+                    </>
+                  ) : (
+                    <>
+                      직접 올린 <b>{sourceName}</b> 결제 내역을 분석했어요.
+                    </>
+                  )}
                 </footer>
               </>
             )

@@ -1,6 +1,6 @@
-# 2project — 새는 돈 찾기
+# 돈구마
 
-> 결제 내역을 분석해 **어디로 새는지 모르는 돈**을 찾아주는 서비스.
+> **돈구마** — 결제 내역을 분석해 **어디로 새는지 모르는 돈**을 찾아주는 서비스.
 > 사람뿐 아니라 **AI 에이전트가 사용자**가 되어, 사용자 대신 지출을 조회·분석할 수 있도록 MCP 도구로 제공합니다.
 
 서울대학교 멋쟁이사자처럼 2학기 프로젝트
@@ -94,12 +94,12 @@ Claude Desktop의 `claude_desktop_config.json`에 추가 (경로는 본인 환�
 ```json
 {
   "mcpServers": {
-    "saedon": {
+    "dongguma": {
       "command": "/절대경로/2project/.venv/bin/python",
       "args": ["/절대경로/2project/mcp_server/server.py"],
       "env": {
-        "SAEDON_API_URL": "http://127.0.0.1:8000/api",
-        "SAEDON_TOKEN": "발급받은 토큰"
+        "DONGGUMA_API_URL": "http://127.0.0.1:8000/api",
+        "DONGGUMA_TOKEN": "발급받은 토큰"
       }
     }
   }

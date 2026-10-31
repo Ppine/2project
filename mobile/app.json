@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "새는 돈 찾기",
-    "slug": "saedon",
+    "name": "돈구마",
+    "slug": "dongguma",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.saedon.app"
+      "package": "com.dongguma.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,300 +1,713 @@
-import { useState } from 'react'
-import demoCsv from '../../data/demo_card_2026.csv?raw'
+import { useEffect, useMemo, useState } from "react";
+import demoCsv from "../../data/demo_card_2026.csv?raw";
 
-const CYCLE_LABELS = { monthly: '월', yearly: '연' }
-const CONFIDENCE_LABELS = { high: '높음', medium: '중간', low: '낮음' }
+const CYCLE_LABELS = { monthly: "월", yearly: "연" };
+const CONFIDENCE_LABELS = {
+  high: "높은 신뢰도",
+  medium: "확인 필요",
+  low: "확인 필요",
+};
+const won = (n) => `${Number(n ?? 0).toLocaleString("ko-KR")}원`;
 
-const won = (n) => `${n.toLocaleString('ko-KR')}원`
+const LOCAL_SERVICES = [
+  {
+    merchant: "네이버플러스멤버십",
+    service: "Naver Plus Membership",
+    plan: "멤버십",
+    cancel: { via: "web", url: "https://nid.naver.com/membership/my" },
+  },
+  {
+    merchant: "NETFLIX.COM",
+    service: "Netflix",
+    plan: "스탠다드",
+    cancel: { via: "web", url: "https://help.netflix.com/en/node/407" },
+  },
+  {
+    merchant: "APPLE.COM/BILL",
+    service: "iCloud+",
+    plan: "200GB",
+    cancel: {
+      via: "app_store",
+      url: "https://apps.apple.com/account/subscriptions",
+    },
+  },
+  {
+    merchant: "쿠팡(와우멤버십)",
+    service: "Coupang Wow",
+    plan: "와우 멤버십",
+    cancel: { via: "web", url: "https://www.coupang.com/np/coupangwow" },
+  },
+  {
+    merchant: "GOOGLE*SPEAK",
+    service: "Speak",
+    plan: "프리미엄",
+    cancel: {
+      via: "google_play",
+      url: "https://play.google.com/store/account/subscriptions",
+    },
+  },
+  {
+    merchant: "PAYPAL *SPOTIFY",
+    service: "Spotify",
+    plan: "Premium",
+    cancel: {
+      via: "web",
+      url: "https://www.spotify.com/account/subscription/",
+    },
+  },
+  {
+    merchant: "토스페이먼츠",
+    amount: 14900,
+    service: "YouTube Premium",
+    plan: "Premium",
+    cancel: { via: "web", url: "https://www.youtube.com/paid_memberships" },
+  },
+  {
+    merchant: "NICE페이",
+    amount: 9900,
+    service: "NICE페이",
+    confidence: "medium",
+    candidates: ["Disney+", "Canva", "CapCut"],
+  },
+];
+
+function parseCsvLine(line) {
+  return line
+    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+    .map((value) => value.trim().replace(/^"|"$/g, "").replaceAll('""', '"'));
+}
+
+function makeLocalDemo(csv) {
+  const [headerLine, ...lines] = csv
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .split(/\r?\n/);
+  const headers = parseCsvLine(headerLine);
+  const rows = lines.map((line) =>
+    Object.fromEntries(
+      parseCsvLine(line).map((value, index) => [headers[index], value]),
+    ),
+  );
+  const transactions = rows.map((row) => ({
+    date: row["이용일자"],
+    merchant: row["가맹점명"],
+    amount: Number(row["이용금액"].replaceAll(",", "")),
+  }));
+
+  const subscriptions = LOCAL_SERVICES.flatMap((definition) => {
+    const charges = transactions.filter(
+      (item) =>
+        item.merchant === definition.merchant &&
+        (!definition.amount || item.amount === definition.amount),
+    );
+    if (charges.length < 2) return [];
+    const last = charges.at(-1);
+    const [year, month, day] = last.date.split("-").map(Number);
+    const nextDate = new Date(Date.UTC(year, month, day));
+    const confidence = definition.confidence || "high";
+    return [
+      {
+        service: definition.service,
+        merchant: definition.merchant,
+        amount: last.amount,
+        cycle: "monthly",
+        next_payment_date: nextDate.toISOString().slice(0, 10),
+        confidence,
+        candidates: (definition.candidates || [definition.service]).map(
+          (service) => ({ service, confidence }),
+        ),
+        price_history: [...new Set(charges.map((charge) => charge.amount))].map(
+          (amount) => ({ amount }),
+        ),
+        plan: definition.plan,
+        cancel: definition.cancel,
+      },
+    ];
+  }).sort((a, b) => a.next_payment_date.localeCompare(b.next_payment_date));
+
+  return {
+    transactions: transactions.length,
+    monthly_total: subscriptions.reduce(
+      (total, item) => total + item.amount,
+      0,
+    ),
+    subscriptions,
+  };
+}
+
+const LOCAL_DEMO = makeLocalDemo(demoCsv);
+const dateLabel = (value) => {
+  if (!value) return "일정 확인 중";
+  const date = new Date(`${value}T00:00:00`);
+  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+};
 
 function App() {
-  const [file, setFile] = useState(null)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [dragging, setDragging] = useState(false)
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [offlineDemo, setOfflineDemo] = useState(false);
+  const [screen, setScreen] = useState(() =>
+    window.localStorage.getItem("dongguma-demo-connected") === "true"
+      ? "dashboard"
+      : "onboarding",
+  );
+  const [connecting, setConnecting] = useState(false);
+  const [connectStep, setConnectStep] = useState(0);
 
-  function pick(next) {
-    setFile(next ?? null)
-    setError('')
-  }
-
-  function useDemo() {
-    pick(new File([demoCsv], 'demo_card_2026.csv', { type: 'text/csv' }))
-  }
-
-  async function analyze(e) {
-    e.preventDefault()
-    if (!file) return
-    setLoading(true)
-    setError('')
-    setResult(null)
+  async function loadDemo() {
+    setLoading(true);
+    setError("");
     try {
-      const body = new FormData()
-      body.append('file', file)
-      const response = await fetch('/api/statements/', { method: 'POST', body })
-      const data = await response.json()
-      if (!response.ok) {
-        setError(data.detail ?? '분석에 실패했습니다')
-      } else {
-        setResult(data)
-      }
-    } catch {
-      setError('서버에 연결할 수 없습니다')
+      const body = new FormData();
+      body.append(
+        "file",
+        new File([demoCsv], "demo_card_2026.csv", { type: "text/csv" }),
+      );
+      const response = await fetch("/api/statements/", {
+        method: "POST",
+        body,
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.detail ?? "데모 데이터를 불러오지 못했어요.");
+      setOfflineDemo(false);
+      setResult(data);
+    } catch (e) {
+      // 백엔드 미실행 상태에서도 프론트 데모를 바로 볼 수 있도록 로컬 예시를 표시합니다.
+      setOfflineDemo(true);
+      setResult(LOCAL_DEMO);
+      setError("");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
-  return (
-    <main>
-      <header className="hero">
-        <h1>새는 돈 찾기</h1>
-        <p className="lead">
-          명세서에 <b>토스페이먼츠</b>, <b>APPLE.COM/BILL</b>로만 찍힌 결제, 정체를 찾아드려요.
-        </p>
-        <p>카드 명세서를 올리면 반복 결제를 구독으로 묶고, 결제대행사 이름 뒤에 숨은 실제 서비스와 월 구독 합계를 보여줘요.</p>
-      </header>
+  async function connectDemo() {
+    if (connecting) return;
+    setConnecting(true);
+    setConnectStep(0);
+    for (let step = 1; step <= 3; step += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 850));
+      setConnectStep(step);
+    }
+    await loadDemo();
+    window.localStorage.setItem("dongguma-demo-connected", "true");
+    setScreen("dashboard");
+    setConnecting(false);
+  }
 
-      <section className="card">
-        <h2>카드 명세서 올리기</h2>
-        <form onSubmit={analyze}>
-          <label
-            className={`dropzone${dragging ? ' dragging' : ''}${file ? ' has-file' : ''}`}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragging(true)
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              setDragging(false)
-              pick(e.dataTransfer.files[0])
-            }}
-          >
-            <input
-              type="file"
-              className="visually-hidden"
-              aria-label="카드 명세서 파일"
-              onChange={(e) => pick(e.target.files[0])}
-            />
-            <FileIcon />
-            {file ? (
-              <>
-                <strong>{file.name}</strong>
-                <small>다른 파일을 고르려면 다시 클릭하세요</small>
-              </>
-            ) : (
-              <>
-                <strong>CSV 파일을 끌어다 놓거나 클릭해서 선택</strong>
-                <small>필요한 열: 이용일자 · 가맹점명 · 이용금액</small>
-              </>
-            )}
-          </label>
-          <div className="actions">
-            <button type="submit" disabled={!file || loading}>
-              {loading ? '분석 중…' : '분석하기'}
+  useEffect(() => {
+    if (screen === "dashboard" && !result) loadDemo();
+  }, [screen]);
+
+  if (screen === "onboarding")
+    return (
+      <Onboarding
+        connecting={connecting}
+        step={connectStep}
+        onConnect={connectDemo}
+      />
+    );
+
+  const subscriptions = result?.subscriptions ?? [];
+  const needsReview = subscriptions.filter(
+    (s) => s.confidence !== "high",
+  ).length;
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <a className="brand" href="#top" aria-label="돈구마 홈">
+          <span className="brand-mark">
+            <img className="brand-logo-image" src="/dongguma-logo.svg" alt="" />
+          </span>
+          <span>돈구마</span>
+        </a>
+        <div className="side-label">관리</div>
+        <nav className="side-nav" aria-label="메인 메뉴">
+          <a className="nav-item active" href="#overview">
+            <span className="nav-icon">▦</span>한눈에 보기
+          </a>
+          <a className="nav-item" href="#subscriptions">
+            <span className="nav-icon">◷</span>내 구독
+          </a>
+          <a className="nav-item" href="#insights">
+            <span className="nav-icon">⌁</span>새는 돈 알림
+          </a>
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="demo-side-card">
+            <span className="demo-dot" />
+            데모 계정
+            <p>
+              가상 결제 내역을 바탕으로
+              <br />
+              서비스를 둘러보고 있어요.
+            </p>
+          </div>
+          <div className="profile-row">
+            <span className="avatar avatar-mascot">
+              <img src="/dongguma-logo.svg" alt="" />
+            </span>
+            <span>
+              <b>don_gu_miner</b>
+              <small>체험 계정</small>
+            </span>
+            <span className="more">···</span>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-area" id="top">
+        <header className="topbar">
+          <div className="breadcrumb">
+            내 금융 <span>/</span> 구독 관리
+          </div>
+          <div className="top-actions">
+            <button
+              className="replay-onboarding"
+              type="button"
+              onClick={() => {
+                window.localStorage.removeItem("dongguma-demo-connected");
+                setResult(null);
+                setOfflineDemo(false);
+                setError("");
+                setScreen("onboarding");
+              }}
+            >
+              연동 과정 다시 보기
             </button>
-            <button type="button" className="ghost" onClick={useDemo} disabled={loading}>
-              데모 명세서로 해보기
+            <span className="demo-pill">
+              <span className="demo-dot" />
+              데모 데이터
+            </span>
+            <button className="icon-button" type="button" aria-label="알림">
+              ♧<i />
             </button>
           </div>
-        </form>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <p className="privacy">카드번호는 저장하지 않아요. 날짜 · 가맹점명 · 금액만 분석해요.</p>
-      </section>
+        </header>
 
-      {result ? <Subscriptions result={result} onResult={setResult} /> : <Intro />}
-    </main>
-  )
-}
-
-function FileIcon() {
-  return (
-    <svg className="drop-icon" viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
-      <path
-        d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M12 18v-6m0 0-2.5 2.5M12 12l2.5 2.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-const STEPS = [
-  { title: '명세서 올리기', body: '카드사 홈페이지에서 받은 이용내역 CSV를 올려요.' },
-  { title: '반복 결제 찾기', body: '같은 곳에 같은 금액이 매달·매년 나간 결제를 구독으로 묶어요.' },
-  { title: '정체 밝히기', body: 'PG사·앱마켓 표기를 구독 요금표와 맞춰 실제 서비스와 신뢰도로 바꿔요.' },
-]
-
-const EXAMPLES = [
-  { merchant: '토스페이먼츠', amount: 14900, service: 'YouTube Premium', confidence: 'high' },
-  { merchant: 'APPLE.COM/BILL', amount: 4400, service: 'iCloud+ 200GB', confidence: 'high' },
-  { merchant: 'NICE페이', amount: 9900, service: 'Disney+ · Canva · CapCut 중 하나', confidence: 'medium' },
-]
-
-function Intro() {
-  return (
-    <>
-      <section className="card">
-        <h2>이렇게 찾아드려요</h2>
-        <ol className="steps">
-          {STEPS.map((s, i) => (
-            <li key={s.title}>
-              <span className="step-no">{i + 1}</span>
-              <div>
-                <strong>{s.title}</strong>
-                <p>{s.body}</p>
+        <div className="page-content" id="overview">
+          <section className="welcome-row">
+            <div className="hero-copy">
+              <h1>돈구마</h1>
+              <p className="welcome-copy">
+                <strong className="hero-quote">“땅 파서 돈이 나오냐?”</strong>{" "}
+                돈구마는 결제 땅에서 숨은 돈을 캐낼 수 있습니다!
+              </p>
+            </div>
+            <div className="hero-side">
+              <div className="mascot-stage">
+                <img
+                  className="mascot-image"
+                  src="/dongguma-mascot-2d.png"
+                  alt="돈구마가 호미로 땅을 파서 동전과 지폐를 발견하고 기뻐하는 모습"
+                />
               </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+              <button
+                className="refresh-button"
+                type="button"
+                onClick={loadDemo}
+                disabled={loading}
+              >
+                <span className={loading ? "spin" : ""}>↻</span> 데모 다시 찾기
+              </button>
+            </div>
+          </section>
 
-      <section className="card">
-        <h2>
-          결과 미리보기 <span className="tag">예시</span>
-        </h2>
-        <ul className="examples">
-          {EXAMPLES.map((e) => (
-            <li key={e.merchant}>
-              <div className="ex-from">
-                <small>명세서 표기</small>
-                <span>{e.merchant}</span>
-              </div>
-              <span className="arrow" aria-hidden="true">
-                →
+          {offlineDemo && (
+            <div className="error-panel offline-panel" role="status">
+              <b>CSV 미리보기</b>
+              <span>
+                백엔드 연결 전이라 저장소의 demo_card_2026.csv를 브라우저에서
+                분석해 보여드려요.
               </span>
-              <div className="ex-to">
-                <small>찾은 서비스</small>
-                <span>{e.service}</span>
+            </div>
+          )}
+          {error && (
+            <div className="error-panel" role="alert">
+              <b>데이터를 불러오지 못했어요</b>
+              <span>{error}</span>
+              <button type="button" onClick={loadDemo}>
+                다시 시도
+              </button>
+            </div>
+          )}
+
+          {loading && !result ? (
+            <LoadingState />
+          ) : (
+            result && (
+              <>
+                <section className="summary-grid" aria-label="구독 요약">
+                  <article className="summary-card primary-summary">
+                    <div className="summary-label">
+                      매달 나가는 구독료 <span className="mini-icon">₩</span>
+                    </div>
+                    <strong>{won(result.monthly_total)}</strong>
+                    <div className="summary-foot">
+                      <span className="trend-icon">↗</span> 월 기준 예상 지출
+                    </div>
+                    <div className="summary-decoration" aria-hidden="true">
+                      ₩
+                    </div>
+                  </article>
+                  <article className="summary-card">
+                    <div className="summary-label">
+                      찾은 구독 <span className="mini-icon blue-icon">◷</span>
+                    </div>
+                    <strong>
+                      {subscriptions.length}
+                      <small>건</small>
+                    </strong>
+                    <div className="summary-foot">여러 결제처에서 모았어요</div>
+                  </article>
+                  <article className="summary-card coral-summary">
+                    <div className="summary-label">
+                      확인할 항목{" "}
+                      <span className="mini-icon coral-icon">!</span>
+                    </div>
+                    <strong>
+                      {needsReview}
+                      <small>건</small>
+                    </strong>
+                    <div className="summary-foot">
+                      실제 서비스를 확인해 주세요
+                    </div>
+                  </article>
+                </section>
+
+                <section className="insight-banner" id="insights">
+                  <div className="insight-symbol">✦</div>
+                  <div className="insight-copy">
+                    <span className="insight-kicker">이번 달 체크</span>
+                    <h2>
+                      {needsReview > 0
+                        ? `정체를 확인할 결제가 ${needsReview}건 있어요`
+                        : "모든 결제 출처를 확인했어요"}
+                    </h2>
+                    <p>
+                      PG사와 앱마켓 이름으로 표시된 결제는 실제 서비스 후보를
+                      확인해 보세요.
+                    </p>
+                  </div>
+                  <a href="#subscriptions" className="insight-link">
+                    확인하기 <span>→</span>
+                  </a>
+                </section>
+
+                <div className="section-heading" id="subscriptions">
+                  <div>
+                    <p className="eyebrow">YOUR SUBSCRIPTIONS</p>
+                    <h2>내 구독</h2>
+                  </div>
+                  <span className="list-count">
+                    {subscriptions.length}개 서비스
+                  </span>
+                </div>
+                <section className="subscription-panel">
+                  <div className="table-head">
+                    <span>서비스</span>
+                    <span>결제 금액</span>
+                    <span>다음 결제일</span>
+                    <span>상태</span>
+                    <span />
+                  </div>
+                  {subscriptions.length === 0 ? (
+                    <div className="empty-state">
+                      아직 발견된 구독이 없어요.
+                    </div>
+                  ) : (
+                    subscriptions.map((sub) => (
+                      <Subscription
+                        key={`${sub.merchant}-${sub.amount}`}
+                        sub={sub}
+                        offline={offlineDemo}
+                        onResult={(next, target) => {
+                          if (offlineDemo && typeof next === "string") {
+                            setResult((current) => ({
+                              ...current,
+                              subscriptions: current.subscriptions.map(
+                                (item) =>
+                                  item.merchant === target.merchant &&
+                                  item.amount === target.amount
+                                    ? {
+                                        ...item,
+                                        service: next,
+                                        confidence: "high",
+                                        candidates: [
+                                          { service: next, confidence: "high" },
+                                        ],
+                                        cancel: null,
+                                      }
+                                    : item,
+                              ),
+                            }));
+                          } else setResult(next);
+                        }}
+                      />
+                    ))
+                  )}
+                </section>
+                <footer className="page-footer">
+                  <span className="footer-lock">⌑</span> 실제 금융 정보가 아닌{" "}
+                  <b>demo_card_2026.csv</b> 가상 결제 내역을 분석한 데모예요.
+                </footer>
+              </>
+            )
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+const CONNECT_STEPS = [
+  "가상 카드 명세서를 불러오고 있어요",
+  "반복 결제와 구독 후보를 살펴보고 있어요",
+  "서비스와 다음 결제일을 정리하고 있어요",
+];
+
+function Onboarding({ connecting, step, onConnect }) {
+  return (
+    <main className="onboarding-shell">
+      <header className="onboarding-header">
+        <a className="onboarding-brand" href="#" aria-label="돈구마">
+          <span className="onboarding-brand-mark">
+            <img src="/dongguma-logo.svg" alt="" />
+          </span>
+          돈구마
+        </a>
+        <span className="onboarding-demo-tag">
+          <i /> 체험용 데모
+        </span>
+      </header>
+      <section className="onboarding-content">
+        <div className="onboarding-copy">
+          <p className="onboarding-eyebrow">HIDDEN SUBSCRIPTIONS, FOUND</p>
+          <h1>
+            흩어진 결제에서
+            <br />
+            <em>숨은 구독</em>을 찾아볼까요?
+          </h1>
+          <p className="onboarding-description">
+            가상 결제 내역을 연결하면 돈구마가 반복 결제를 모아
+            <br className="desktop-only" /> 구독 서비스와 다음 결제일을
+            찾아드려요.
+          </p>
+          <div className="connect-source-card">
+            <div className="source-icon">▤</div>
+            <div className="source-copy">
+              <b>데모 카드 명세서</b>
+              <span>돈구마가 준비한 가상 결제 데이터</span>
+            </div>
+            <span className="source-badge">시연 데이터</span>
+          </div>
+          {connecting ? (
+            <div className="connect-progress" aria-live="polite">
+              <div className="progress-heading">
+                <span className="loader" />
+                <b>{CONNECT_STEPS[Math.max(0, step - 1)]}</b>
               </div>
-              <div className="ex-side">
-                <strong>{won(e.amount)}/월</strong>
-                <span className={`badge ${e.confidence}`}>신뢰도 {CONFIDENCE_LABELS[e.confidence]}</span>
+              <div className="progress-track">
+                <span style={{ width: `${Math.max(8, (step / 3) * 100)}%` }} />
               </div>
-            </li>
-          ))}
-        </ul>
-        <p className="agent-note">
-          Claude 같은 AI 에이전트에서도 MCP로 연결해 &ldquo;나 지금 뭐 구독하고 있어?&rdquo;라고 물어볼 수 있어요.
-        </p>
+              <ol>
+                {CONNECT_STEPS.map((label, index) => (
+                  <li
+                    className={
+                      step > index ? "done" : step === index ? "current" : ""
+                    }
+                    key={label}
+                  >
+                    <i>{step > index ? "✓" : index + 1}</i>
+                    {label}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : (
+            <button
+              className="connect-button"
+              type="button"
+              onClick={onConnect}
+            >
+              데모 데이터 연동하기 <span>→</span>
+            </button>
+          )}
+          <p className="onboarding-privacy">
+            <span>⌑</span> 실제 금융 계정 연결 없이 가상 데이터로만 작동해요.
+          </p>
+        </div>
+        <div className="onboarding-art-wrap">
+          <div className="onboarding-art-halo" />
+          <img
+            className="onboarding-mascot"
+            src="/dongguma-mascot-2d.png"
+            alt="돈구마가 호미로 땅을 파서 금화와 지폐를 발견한 모습"
+          />
+          <div className="onboarding-art-caption">
+            <span>돈구마의 약속</span>
+            <b>
+              숨은 구독과 결제일을
+              <br />
+              한눈에 모아드릴게요.
+            </b>
+          </div>
+        </div>
       </section>
-    </>
-  )
+      <footer className="onboarding-footer">
+        <span>DON GUMA</span>
+        <span>가상 데이터로 경험하는 구독 관리</span>
+      </footer>
+    </main>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="loading-state">
+      <span className="loader" />
+      <b>가상 결제 내역을 분석하고 있어요</b>
+      <span>반복 결제와 서비스 후보를 찾는 중이에요.</span>
+    </div>
+  );
+}
+
+function ServiceMark({ name }) {
+  const first = (name || "?")
+    .replace(/[^A-Za-z가-힣0-9]/g, "")
+    .slice(0, 1)
+    .toUpperCase();
+  const className = /netflix/i.test(name)
+    ? "netflix"
+    : /apple|icloud/i.test(name)
+      ? "apple"
+      : /spotify/i.test(name)
+        ? "spotify"
+        : /youtube/i.test(name)
+          ? "youtube"
+          : /naver/i.test(name)
+            ? "naver"
+            : /coupang/i.test(name)
+              ? "coupang"
+              : "generic";
+  return <span className={`service-mark ${className}`}>{first}</span>;
 }
 
 const CANCEL_LABELS = {
-  web: '해지하기',
-  google_play: 'Google Play에서 해지',
-  app_store: 'App Store에서 해지',
-}
-
-function Subscriptions({ result, onResult }) {
-  const { subscriptions, monthly_total: total, transactions } = result
+  web: "해지 안내",
+  google_play: "Google Play",
+  app_store: "App Store",
+};
+function Subscription({ sub, onResult, offline }) {
+  const confirmed = sub.confidence === "high";
+  const changed = sub.price_history?.length > 1;
+  const title = sub.service || sub.merchant;
   return (
-    <>
-      <section className="card total">
-        <span>월 구독 합계</span>
-        <strong>{won(total)}</strong>
-        <small>
-          구독 {subscriptions.length}건 · 거래 {transactions}건 분석
-        </small>
-      </section>
-
-      <section className="card">
-        <h2>구독 목록</h2>
-        {subscriptions.length === 0 ? (
-          <p>반복 결제를 찾지 못했어요.</p>
-        ) : (
-          <ul className="subs">
-            {subscriptions.map((s) => (
-              <Subscription key={`${s.merchant}-${s.amount}`} sub={s} onResult={onResult} />
-            ))}
-          </ul>
+    <article className="subscription-row">
+      <div className="service-cell">
+        <ServiceMark name={title} />
+        <div className="service-text">
+          <b>{title}</b>
+          <small>
+            {sub.service !== sub.merchant
+              ? `명세서 표기 · ${sub.merchant}`
+              : sub.plan || "정기 구독"}
+          </small>
+        </div>
+      </div>
+      <div className="amount-cell">
+        <b>{won(sub.amount)}</b>
+        <small>/{CYCLE_LABELS[sub.cycle] || "월"}</small>
+        {changed && <span className="price-up">금액 인상</span>}
+      </div>
+      <div className="date-cell">
+        <b>{dateLabel(sub.next_payment_date)}</b>
+        <small>예정</small>
+      </div>
+      <div className="status-cell">
+        <span className={`status-badge ${confirmed ? "confirmed" : "review"}`}>
+          <i />
+          {confirmed ? "확인 완료" : "확인 필요"}
+        </span>
+        {!confirmed && sub.confidence && (
+          <small>{CONFIDENCE_LABELS[sub.confidence]}</small>
         )}
-      </section>
-    </>
-  )
-}
-
-function Subscription({ sub, onResult }) {
-  const confirmed = sub.confidence === 'high'
-  const notes = [
-    sub.service !== sub.merchant && `명세서 표기: ${sub.merchant}`,
-    sub.price_history.length > 1 && '금액 변경됨',
-  ].filter(Boolean)
-
-  return (
-    <li className="sub">
-      <div className="sub-head">
-        <div>
-          <div className="sub-name">{sub.service}</div>
-          {notes.length > 0 && <small>{notes.join(' · ')}</small>}
-        </div>
-        <div className="sub-amount">
-          {won(sub.amount)}
-          <small>/{CYCLE_LABELS[sub.cycle]}</small>
-        </div>
       </div>
-      <div className="sub-meta">
-        <span>다음 결제 {sub.next_payment_date}</span>
-        <span className={`badge ${sub.confidence}`}>신뢰도 {CONFIDENCE_LABELS[sub.confidence]}</span>
-      </div>
-      {confirmed ? (
-        sub.cancel && (
-          <a className="button secondary" href={sub.cancel.url} target="_blank" rel="noreferrer">
-            {CANCEL_LABELS[sub.cancel.via]}
+      <div className="row-action">
+        {confirmed && sub.cancel ? (
+          <a
+            href={sub.cancel.url}
+            target="_blank"
+            rel="noreferrer"
+            className="cancel-link"
+          >
+            {CANCEL_LABELS[sub.cancel.via] || "해지 안내"} <span>↗</span>
           </a>
-        )
-      ) : (
-        <ConfirmService sub={sub} onResult={onResult} />
-      )}
-    </li>
-  )
+        ) : !confirmed ? (
+          <ConfirmService sub={sub} offline={offline} onResult={onResult} />
+        ) : (
+          <span className="no-action">안내 준비 중</span>
+        )}
+      </div>
+    </article>
+  );
 }
 
-function ConfirmService({ sub, onResult }) {
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  if (sub.candidates.length === 0) return <small>어떤 서비스인지 찾지 못했어요.</small>
-
+function ConfirmService({ sub, onResult, offline }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const candidates = useMemo(() => sub.candidates ?? [], [sub.candidates]);
   async function confirm(service) {
-    setSaving(true)
-    setError('')
+    if (offline) {
+      onResult(service, sub);
+      return;
+    }
+    setSaving(true);
+    setError("");
     try {
-      const response = await fetch('/api/merchant-aliases/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ merchant: sub.merchant, amount: sub.amount, service }),
-      })
-      if (!response.ok) throw new Error()
-      onResult(await response.json())
-    } catch {
-      setError('저장하지 못했어요')
-      setSaving(false)
+      const response = await fetch("/api/merchant-aliases/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchant: sub.merchant,
+          amount: sub.amount,
+          service,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "저장하지 못했어요");
+      onResult(data);
+    } catch (e) {
+      setError(e.message || "저장하지 못했어요");
+    } finally {
+      setSaving(false);
     }
   }
-
+  if (!candidates.length)
+    return <span className="no-action">후보를 찾지 못했어요</span>;
   return (
-    <div className="confirm">
-      <small>어떤 서비스인가요? 확인하면 해지 방법을 알려드려요.</small>
-      <div className="chips">
-        {sub.candidates.map((c) => (
-          <button key={c.service} type="button" className="chip" disabled={saving} onClick={() => confirm(c.service)}>
-            {c.service}
+    <div className="candidate-wrap">
+      <span className="candidate-label">실제 서비스 후보</span>
+      <div className="candidate-list">
+        {candidates.slice(0, 2).map((candidate) => (
+          <button
+            key={candidate.service}
+            className="candidate-button"
+            type="button"
+            disabled={saving}
+            onClick={() => confirm(candidate.service)}
+          >
+            {candidate.service}
+            <span>선택</span>
           </button>
         ))}
       </div>
-      {error && <small className="error">{error}</small>}
+      {error && <small className="error-text">{error}</small>}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

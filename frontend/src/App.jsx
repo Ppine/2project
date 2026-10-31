@@ -295,7 +295,11 @@ function App() {
             <button
               className="replay-onboarding"
               type="button"
-              onClick={() => {
+              onClick={async () => {
+                // 후보 선택 결과(서버에 저장된 매핑)도 지워 처음 상태로 되돌립니다.
+                await fetch("/api/merchant-aliases/", {
+                  method: "DELETE",
+                }).catch(() => {});
                 window.localStorage.removeItem("dongguma-demo-connected");
                 setResult(null);
                 setOfflineDemo(false);

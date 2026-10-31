@@ -134,6 +134,11 @@ class MerchantAliasView(APIView):
         )
         return Response(_analysis())
 
+    def delete(self, request):
+        """데모를 처음부터 다시 볼 수 있도록 사용자가 확인한 매핑을 모두 지운다."""
+        deleted, _ = MerchantAlias.objects.all().delete()
+        return Response({"deleted": deleted})
+
 
 class SubscriptionListView(APIView):
     def get(self, request):

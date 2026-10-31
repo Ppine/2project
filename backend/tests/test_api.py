@@ -150,6 +150,18 @@ def test_confirm_alias_makes_charge_cancellable(client):
     assert client.post("/api/merchant-aliases/", {"merchant": "NICE페이"}, format="json").status_code == 400
 
 
+def test_reset_aliases_clears_confirmed_services(client):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    client.post("/api/merchant-aliases/", {"merchant": "NICE페이", "amount": 9900, "service": "Disney+"},
+                format="json")
+    response = client.delete("/api/merchant-aliases/")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1}
+    subs = upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes()).json()["subscriptions"]
+    nice = next(s for s in subs if s["merchant"] == "NICE페이")
+    assert nice["confidence"] != "high"
+
+
 def test_off_cycle_notification_keeps_subscription(client, app_auth, token):
     upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
     body = notify(client, app_auth, "본인3381 9,900원 일시불 10/29 14:22 NICE페이",

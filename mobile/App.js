@@ -99,7 +99,7 @@ function Setup({ onDone }) {
 
   return (
     <View style={styles.setup}>
-      <Text style={styles.title}>새는 돈 찾기</Text>
+      <Text style={styles.title}>돈구마</Text>
       <Text style={styles.muted}>카드 결제 알림을 자동으로 모아 구독을 찾아드려요.</Text>
       <Text style={styles.label}>서버 주소</Text>
       <TextInput style={styles.input} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none"
@@ -176,7 +176,7 @@ function Home({ config, onReset }) {
   const header = (
     <View>
       <View style={styles.header}>
-        <Text style={styles.title}>새는 돈 찾기</Text>
+        <Text style={styles.title}>돈구마</Text>
         <Pressable onPress={onReset} hitSlop={12}>
           <Text style={styles.link}>연결 설정</Text>
         </Pressable>

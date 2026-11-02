@@ -49,6 +49,8 @@ def parse_statement(filename: str, data: bytes) -> list[Transaction]:
 
     transactions = []
     for row in reader:
+        if None in row:  # 헤더보다 칸이 많은 행 (따옴표 없이 쉼표가 들어간 금액 등)
+            raise UnsupportedFormat(f"{reader.line_num}번째 줄의 칸 수가 머리글과 다릅니다")
         row = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
         if not any(row.values()):
             continue

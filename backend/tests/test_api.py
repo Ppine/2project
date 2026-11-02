@@ -170,3 +170,103 @@ def test_off_cycle_notification_keeps_subscription(client, app_auth, token):
     assert body["subscription"] is None  # 정기 결제가 아닌 일회성 결제
     subs = client.get("/api/subscriptions/", HTTP_AUTHORIZATION=f"Bearer {token}").json()["subscriptions"]
     assert len(subs) == 8
+
+
+# --- 명세서 누적·관리 ---
+
+
+def _csv(rows):
+    lines = ["이용일자,이용카드,가맹점명,이용금액,승인번호"] + [",".join(r) for r in rows]
+    return "\n".join(lines).encode()
+
+
+def test_statements_accumulate_without_duplicates(client):
+    first = upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes()).json()
+    again = upload(client, "again.csv", DEMO_CSV.read_bytes()).json()
+    assert again["statement"]["added"] == 0
+    assert again["statement"]["skipped"] == first["statement"]["transactions"]
+    assert again["transactions"] == first["transactions"]
+    assert len(again["statements"]) == 1  # 새 거래가 없는 업로드는 목록에 남기지 않는다
+
+
+def test_dashboard_get_returns_statements_and_analysis(client):
+    assert client.get("/api/statements/").json() == {"statements": []}
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    body = client.get("/api/statements/").json()
+    assert len(body["statements"]) == 1 and len(body["subscriptions"]) == 8
+
+
+def test_row_with_extra_columns_is_rejected(client):
+    response = upload(client, "bad.csv", _csv([("2026-10-01", "카드", "GS25", "1,000", "")]))
+    assert response.status_code == 400
+
+
+def test_same_day_same_amount_charges_kept(client):
+    rows = [("2026-10-01", "카드", "GS25", "1000", ""), ("2026-10-01", "카드", "GS25", "1000", "")]
+    body = upload(client, "a.csv", _csv(rows)).json()
+    assert body["statement"]["added"] == 2
+    more = rows + [("2026-10-01", "카드", "GS25", "1000", "")]
+    assert upload(client, "b.csv", _csv(more)).json()["statement"]["added"] == 1
+
+
+def test_delete_one_statement_keeps_others(client):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    extra = upload(client, "extra.csv", _csv([("2026-10-27", "카드", "올리브영", "12000", "999")])).json()
+    statements = client.get("/api/statements/").json()["statements"]
+    assert statements[0]["filename"] == "extra.csv"  # 최근 업로드부터
+    assert statements[1]["period_start"] and statements[1]["period_end"]
+
+    response = client.delete(f"/api/statements/{statements[0]['id']}/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["transactions"] == extra["transactions"] - 1
+    assert len(body["statements"]) == 1
+    assert client.delete(f"/api/statements/{statements[0]['id']}/").status_code == 404
+
+
+def test_delete_all_statements(client):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    assert client.delete("/api/statements/").status_code == 200
+    assert not Transaction.objects.exists()
+
+
+# --- 구독 상태 표시 ---
+
+
+def test_mark_cancelled_survives_reupload(client):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    body = client.post("/api/subscriptions/state/", {"merchant": "NETFLIX.COM", "amount": 17000,
+                                                    "status": "cancelled"}, format="json").json()
+    netflix = next(s for s in body["subscriptions"] if s["service"] == "Netflix")
+    assert netflix["status"] == "cancelled"
+    assert body["monthly_total"] == 99980 - 17000
+
+    again = upload(client, "again.csv", DEMO_CSV.read_bytes()).json()
+    assert next(s for s in again["subscriptions"] if s["service"] == "Netflix")["status"] == "cancelled"
+
+    body = client.post("/api/subscriptions/state/", {"merchant": "NETFLIX.COM", "status": "active"},
+                       format="json").json()
+    assert body["monthly_total"] == 99980
+
+
+def test_pg_cancel_is_per_amount(client):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    body = client.post("/api/subscriptions/state/", {"merchant": "토스페이먼츠", "amount": 14900,
+                                                    "status": "cancelled"}, format="json").json()
+    toss = [s for s in body["subscriptions"] if s["merchant"] == "토스페이먼츠"]
+    assert [s["status"] for s in toss] == ["cancelled"]
+
+
+def test_subscription_state_validation(client):
+    bad = [{"merchant": "NETFLIX.COM", "status": "paused"}, {"status": "cancelled"},
+           {"merchant": "NETFLIX.COM", "status": "cancelled", "amount": "abc"}]
+    for payload in bad:
+        assert client.post("/api/subscriptions/state/", payload, format="json").status_code == 400
+
+
+def test_notifications_do_not_mark_others_lapsed(client, app_auth, token):
+    upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
+    # 명세서 이후 한참 뒤의 알림 한 건이 다른 구독을 '결제 확인 안 됨'으로 만들지 않는다
+    notify(client, app_auth, "본인3381 5,000원 일시불 12/20 14:22 GS25", posted_at=1797744000000)  # 2026-12-20
+    subs = client.get("/api/subscriptions/", HTTP_AUTHORIZATION=f"Bearer {token}").json()["subscriptions"]
+    assert {s["status"] for s in subs} == {"active"}

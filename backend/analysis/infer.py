@@ -6,10 +6,12 @@
 
 import csv
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .clean import describe_merchant, normalize_name
-from .detect import Recurring, detect_subscriptions, find_cycle
+from .detect import Recurring, add_months, detect_subscriptions, find_cycle
 from .parsers import Transaction
 
 CYCLE_LABELS = {"monthly": "매월", "yearly": "매년"}
@@ -18,6 +20,12 @@ MARKET_CANCEL = {
     "google": ("google_play", "https://play.google.com/store/account/subscriptions"),
     "apple": ("app_store", "https://apps.apple.com/account/subscriptions"),
 }
+MARKET_STEPS = {
+    "google_play": "Play 스토어 앱 > 프로필 > 결제 및 정기 결제 > 정기 결제에서 해지",
+    "app_store": "iPhone 설정 > 내 이름 > 구독에서 해지",
+}
+# 예상 결제일이 이만큼 지나도록 결제가 없으면 '결제 확인 안 됨'. 카드사 매입 지연을 감안한 여유다.
+GRACE_DAYS = {"monthly": 7, "yearly": 30}
 FEE_CYCLES = {"월": "monthly", "년": "yearly"}
 
 # 구독료 표에 없는 가맹점 표기 -> 서비스명
@@ -147,15 +155,23 @@ def explain_charge(
             "next_payment_date": sub.next_date.isoformat(), **result}
 
 
-def analyze(transactions: list[Transaction], fees: list[Fee], aliases=None, llm=None) -> dict:
-    """구독 목록과 월 합계 (MCP list_subscriptions, 웹 대시보드)."""
+def analyze(transactions: list[Transaction], fees: list[Fee], aliases=None, llm=None,
+            states: dict | None = None, as_of: date | None = None) -> dict:
+    """구독 목록·월 합계·알림 (MCP list_subscriptions, 웹 대시보드).
+
+    states: 사용자가 표시한 구독 상태 (키 -> (status, 표시한 날짜)). 키는 가맹점 또는 (가맹점, 금액).
+    as_of: 결제가 끊겼는지 판단하는 기준일 (명세서가 덮는 마지막 날짜). 없으면 마지막 거래일.
+    """
+    if as_of is None and transactions:
+        as_of = max(tx.date for tx in transactions)
     subscriptions = []
     for sub in detect_subscriptions(transactions):
         result = identify(sub, fees, aliases, llm)
         top = result["candidates"][0] if result["candidates"] else None
         confirmed = top is not None and result["confidence"] == "high"
+        service = top["service"] if confirmed else sub.raw_merchant
         subscriptions.append({
-            "service": top["service"] if confirmed else sub.raw_merchant,
+            "service": service,
             "plan": top["plan"] if confirmed else None,
             "merchant": sub.raw_merchant,
             "amount": sub.amount,
@@ -167,23 +183,107 @@ def analyze(transactions: list[Transaction], fees: list[Fee], aliases=None, llm=
             "charge_count": len(sub.charges),
             "price_history": sub.price_history,
             "cancel": cancel_info(top["service"], sub.merchant.channel, fees) if confirmed else None,
+            **subscription_status(sub, states or {}, as_of),
             **result,
         })
     subscriptions.sort(key=lambda s: s["next_payment_date"])
+
+    counted = [s for s in subscriptions if counts_toward_total(s)]
+    total = sum(s["monthly_amount"] for s in counted)
+    for s in subscriptions:
+        # 소비 분석 비중: 월 환산 구독료 합계 대비. 합계에서 빠진 구독(해지 등)은 None.
+        s["share"] = round(s["monthly_amount"] / total * 100, 1) if total and counts_toward_total(s) else None
     return {
         "subscriptions": subscriptions,
-        "monthly_total": sum(s["monthly_amount"] for s in subscriptions),
+        "monthly_total": total,
         "currency": "KRW",
+        "as_of": as_of.isoformat() if as_of else None,
+        "alerts": build_alerts(subscriptions),
     }
 
 
-def cancel_info(service: str, channel: str | None, fees: list[Fee]) -> dict | None:
-    """해지 관리 화면. 서비스가 확정된 구독에만 준다 (후보만으로 해지 대상을 정하지 않는다)."""
+def subscription_status(sub: Recurring, states: dict, as_of: date | None) -> dict:
+    """결제 이력과 사용자 표시를 합쳐 지금 상태를 정한다.
+
+    - cancelled: 사용자가 해지했다고 표시했고 그 뒤로 결제가 없음. 예전 결제 기록 때문에 되살아나지 않는다.
+    - active + recharged_after_cancel: 해지 표시 뒤에 결제가 또 들어옴. 해지가 안 됐을 수 있다.
+    - lapsed: 예상 결제일이 지나도록 결제가 없음. 잔액 부족일 수도 있어 해지로 단정하지 않는다.
+    - active: 그 밖.
+    """
+    key = sub.merchant.cleaned
+    state = states.get((key, sub.amount)) or states.get(key)
+    if state and state[0] == "cancelled":
+        marked_on = state[1]
+        if sub.last_date <= marked_on:
+            return {"status": "cancelled", "status_changed_on": marked_on.isoformat(), "missed_cycles": 0}
+        return {"status": "active", "status_changed_on": marked_on.isoformat(), "missed_cycles": 0,
+                "recharged_after_cancel": True}
+
+    missed = 0
+    if as_of:
+        due = sub.next_date
+        grace = timedelta(days=GRACE_DAYS[sub.cycle])
+        while due + grace < as_of:
+            missed += 1
+            due = add_months(due, 1 if sub.cycle == "monthly" else 12)
+    return {"status": "lapsed" if missed else "active", "status_changed_on": None, "missed_cycles": missed}
+
+
+def counts_toward_total(sub: dict) -> bool:
+    """월 합계에 넣을 구독. 해지했거나 두 번 이상 결제가 빠진 구독은 이미 끝났을 가능성이 커서 뺀다."""
+    return sub["status"] == "active" or (sub["status"] == "lapsed" and sub["missed_cycles"] < 2)
+
+
+def build_alerts(subscriptions: list[dict]) -> list[dict]:
+    """구독 목록과 분리해서 보여 줄 알림. 중요한 것부터."""
+    alerts = []
+    for s in subscriptions:
+        base = {"service": s["service"], "merchant": s["merchant"], "amount": s["amount"]}
+        if s.get("recharged_after_cancel"):
+            alerts.append({**base, "type": "recharged_after_cancel", "date": s["last_charge_date"],
+                           "message": f"해지했다고 표시한 {s['service']}에서 {s['last_charge_date']}에 다시 결제됐어요"})
+        if s["status"] == "cancelled":
+            continue
+        history = s["price_history"]
+        if len(history) > 1:
+            before, after = history[-2]["amount"], history[-1]["amount"]
+            change = after - before
+            verb = "올랐어요" if change > 0 else "내렸어요"
+            alerts.append({**base, "type": "price_change", "date": history[-1]["since"], "before": before,
+                           "after": after, "message": f"{s['service']} 요금이 {abs(change):,}원 {verb} "
+                                                     f"({before:,}원 → {after:,}원)"})
+        if s["status"] == "lapsed":
+            alerts.append({**base, "type": "lapsed", "date": s["next_payment_date"],
+                           "missed_cycles": s["missed_cycles"],
+                           "message": f"{s['service']} 예상 결제일({s['next_payment_date']})이 지났는데 결제가 없어요. "
+                                      "해지했다면 '해지했어요'로 표시해 주세요"})
+        if s["confidence"] != "high":
+            alerts.append({**base, "type": "needs_review", "date": s["last_charge_date"],
+                           "message": f"{s['merchant']} {s['amount']:,}원 결제의 실제 서비스를 확인해 주세요"})
+    order = ["recharged_after_cancel", "price_change", "lapsed", "needs_review"]
+    return sorted(alerts, key=lambda a: order.index(a["type"]))
+
+
+def cancel_info(service: str, channel: str | None, fees: list[Fee]) -> dict:
+    """해지 경로. 서비스가 확정된 구독에만 준다 (후보만으로 해지 대상을 정하지 않는다).
+
+    URL 은 돈구마가 관리하는 구독료 표나 앱마켓 공식 주소에서만 가져온다. 이동할 도메인(host)을
+    함께 내려 사용자가 결제 사이트로 가기 전에 확인할 수 있게 한다.
+    웹 해지 주소가 없는 서비스는 앱에서 해지하는 방법(steps)만 준다.
+    """
     if channel in MARKET_CANCEL:
         via, url = MARKET_CANCEL[channel]
-        return {"via": via, "url": url}
+        return _cancel(via, url, MARKET_STEPS[via])
     url = next((f.cancel_url for f in fees if f.service == service and f.cancel_url), None)
-    return {"via": "web", "url": url} if url else None
+    if url:
+        return _cancel("web", url, None)
+    return {"via": "app", "url": None, "host": None, "verified": False,
+            "steps": f"{service} 앱 > 설정 > 구독·멤버십 관리에서 해지"}
+
+
+def _cancel(via: str, url: str, steps: str | None) -> dict:
+    parsed = urlparse(url)
+    return {"via": via, "url": url, "host": parsed.hostname, "verified": parsed.scheme == "https", "steps": steps}
 
 
 def _same_merchant(target: str, raw: str) -> bool:

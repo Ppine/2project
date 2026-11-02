@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import demoCsv from "../../data/demo_card_2026.csv?raw";
 
+const DEMO_FILENAME = "demo_card_2026.csv";
 const CYCLE_LABELS = { monthly: "월", yearly: "연" };
-const CONFIDENCE_LABELS = {
-  high: "높은 신뢰도",
-  medium: "확인 필요",
-  low: "확인 필요",
-};
 const won = (n) => `${Number(n ?? 0).toLocaleString("ko-KR")}원`;
 
 const LOCAL_SERVICES = [
@@ -29,6 +25,7 @@ const LOCAL_SERVICES = [
     cancel: {
       via: "app_store",
       url: "https://apps.apple.com/account/subscriptions",
+      steps: "iPhone 설정 > 내 이름 > 구독에서 해지",
     },
   },
   {
@@ -44,6 +41,7 @@ const LOCAL_SERVICES = [
     cancel: {
       via: "google_play",
       url: "https://play.google.com/store/account/subscriptions",
+      steps: "Play 스토어 앱 > 프로필 > 결제 및 정기 결제 > 정기 결제에서 해지",
     },
   },
   {
@@ -71,15 +69,103 @@ const LOCAL_SERVICES = [
   },
 ];
 
+// 카드사 홈페이지에서 이용내역을 엑셀/CSV로 받는 경로. 카드사 연동 API가 없어 직접 받아야 한다.
+const CARD_ISSUERS = [
+  { name: "신한카드", url: "https://www.shinhancard.com" },
+  { name: "KB국민카드", url: "https://card.kbcard.com" },
+  { name: "삼성카드", url: "https://www.samsungcard.com" },
+  { name: "현대카드", url: "https://www.hyundaicard.com" },
+  { name: "롯데카드", url: "https://www.lottecard.co.kr" },
+  { name: "하나카드", url: "https://www.hanacard.co.kr" },
+  { name: "우리카드", url: "https://pc.wooricard.com" },
+  { name: "BC카드", url: "https://www.bccard.com" },
+];
+
+const NAV_ITEMS = [
+  { id: "overview", icon: "▦", label: "한눈에 보기" },
+  { id: "insights", icon: "!", label: "알림" },
+  { id: "analysis", icon: "◔", label: "소비 분석" },
+  { id: "subscriptions", icon: "◷", label: "내 구독" },
+  { id: "statements", icon: "▤", label: "가져온 명세서" },
+];
+
+const ALERT_META = {
+  recharged_after_cancel: { icon: "!", label: "해지 후 결제", tone: "danger" },
+  price_change: { icon: "↗", label: "금액 변경", tone: "warn" },
+  lapsed: { icon: "?", label: "결제 확인 안 됨", tone: "muted" },
+  needs_review: { icon: "✦", label: "출처 확인", tone: "info" },
+};
+
+const SHARE_COLORS = [
+  "#4a4a4a",
+  "#8a5f69",
+  "#c98a96",
+  "#e2b4bd",
+  "#a7737e",
+  "#6b5b5b",
+  "#d9a3ad",
+  "#b9939a",
+];
+
+const hostOf = (url) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+};
+
 function parseCsvLine(line) {
   return line
     .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
     .map((value) => value.trim().replace(/^"|"$/g, "").replaceAll('""', '"'));
 }
 
+const countsTowardTotal = (s) =>
+  s.status === "active" || (s.status === "lapsed" && s.missed_cycles < 2);
+
+// 백엔드 analyze()와 같은 모양으로 합계·비중·알림을 채운다 (오프라인 데모용).
+function finalizeLocal(base) {
+  const counted = base.subscriptions.filter(countsTowardTotal);
+  const total = counted.reduce((sum, s) => sum + s.monthly_amount, 0);
+  const subscriptions = base.subscriptions.map((s) => ({
+    ...s,
+    share:
+      total && countsTowardTotal(s)
+        ? Math.round((s.monthly_amount / total) * 1000) / 10
+        : null,
+  }));
+  const alerts = [];
+  for (const s of subscriptions) {
+    if (s.status === "cancelled") continue;
+    const history = s.price_history;
+    if (history.length > 1) {
+      const [before, after] = [history.at(-2).amount, history.at(-1).amount];
+      alerts.push({
+        type: "price_change",
+        service: s.service,
+        merchant: s.merchant,
+        amount: s.amount,
+        date: history.at(-1).since,
+        message: `${s.service} 요금이 ${Math.abs(after - before).toLocaleString("ko-KR")}원 ${after > before ? "올랐어요" : "내렸어요"} (${won(before)} → ${won(after)})`,
+      });
+    }
+    if (s.confidence !== "high")
+      alerts.push({
+        type: "needs_review",
+        service: s.service,
+        merchant: s.merchant,
+        amount: s.amount,
+        date: s.last_charge_date,
+        message: `${s.merchant} ${won(s.amount)} 결제의 실제 서비스를 확인해 주세요`,
+      });
+  }
+  return { ...base, subscriptions, monthly_total: total, alerts };
+}
+
 function makeLocalDemo(csv) {
   const [headerLine, ...lines] = csv
-    .replace(/^\uFEFF/, "")
+    .replace(/^﻿/, "")
     .trim()
     .split(/\r?\n/);
   const headers = parseCsvLine(headerLine);
@@ -93,6 +179,7 @@ function makeLocalDemo(csv) {
     merchant: row["가맹점명"],
     amount: Number(row["이용금액"].replaceAll(",", "")),
   }));
+  const dates = transactions.map((t) => t.date).sort();
 
   const subscriptions = LOCAL_SERVICES.flatMap((definition) => {
     const charges = transactions.filter(
@@ -105,34 +192,54 @@ function makeLocalDemo(csv) {
     const [year, month, day] = last.date.split("-").map(Number);
     const nextDate = new Date(Date.UTC(year, month, day));
     const confidence = definition.confidence || "high";
+    const priceHistory = [];
+    for (const charge of charges)
+      if (priceHistory.at(-1)?.amount !== charge.amount)
+        priceHistory.push({ since: charge.date, amount: charge.amount });
+    const cancel = definition.cancel
+      ? { steps: null, ...definition.cancel, host: hostOf(definition.cancel.url), verified: true }
+      : null;
     return [
       {
         service: definition.service,
         merchant: definition.merchant,
         amount: last.amount,
+        monthly_amount: last.amount,
         cycle: "monthly",
         next_payment_date: nextDate.toISOString().slice(0, 10),
+        first_charge_date: charges[0].date,
+        last_charge_date: last.date,
+        charge_count: charges.length,
         confidence,
         candidates: (definition.candidates || [definition.service]).map(
           (service) => ({ service, confidence }),
         ),
-        price_history: [...new Set(charges.map((charge) => charge.amount))].map(
-          (amount) => ({ amount }),
-        ),
+        evidence: [`매월 ${charges.length}회 결제`],
+        price_history: priceHistory,
         plan: definition.plan,
-        cancel: definition.cancel,
+        cancel: confidence === "high" ? cancel : null,
+        status: "active",
+        status_changed_on: null,
+        missed_cycles: 0,
       },
     ];
   }).sort((a, b) => a.next_payment_date.localeCompare(b.next_payment_date));
 
-  return {
+  return finalizeLocal({
     transactions: transactions.length,
-    monthly_total: subscriptions.reduce(
-      (total, item) => total + item.amount,
-      0,
-    ),
+    as_of: dates.at(-1),
     subscriptions,
-  };
+    statements: [
+      {
+        id: "local",
+        filename: DEMO_FILENAME,
+        transactions: transactions.length,
+        period_start: dates[0],
+        period_end: dates.at(-1),
+        uploaded_at: null,
+      },
+    ],
+  });
 }
 
 const LOCAL_DEMO = makeLocalDemo(demoCsv);
@@ -141,10 +248,47 @@ const dateLabel = (value) => {
   const date = new Date(`${value}T00:00:00`);
   return `${date.getMonth() + 1}월 ${date.getDate()}일`;
 };
+const fullDate = (value) => (value ? value.replaceAll("-", ".") : "-");
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail ?? "요청을 처리하지 못했어요.");
+  return data;
+}
+
+const jsonPost = (body) => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+function useActiveSection(ids, enabled) {
+  const [active, setActive] = useState(ids[0]);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.find((entry) => entry.isIntersecting);
+        if (visible) setActive(visible.target.id);
+      },
+      { rootMargin: "-25% 0px -65% 0px" },
+    );
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, [enabled, ids]);
+  return active;
+}
+
+const SECTION_IDS = NAV_ITEMS.map((item) => item.id);
 
 function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [offlineDemo, setOfflineDemo] = useState(false);
   const [screen, setScreen] = useState(() =>
@@ -154,60 +298,154 @@ function App() {
   );
   const [connecting, setConnecting] = useState(false);
   const [connectStep, setConnectStep] = useState(0);
-  const [sourceName, setSourceName] = useState("demo_card_2026.csv");
+  const activeSection = useActiveSection(SECTION_IDS, Boolean(result));
+
+  // 서버 응답에 statements가 없으면(구독 상태 변경 등) 기존 목록을 유지한다.
+  function applyResult(data) {
+    setResult((current) => ({
+      ...data,
+      statements: data.statements ?? current?.statements ?? [],
+    }));
+  }
 
   async function postStatement(file) {
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch("/api/statements/", {
-      method: "POST",
-      body,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok)
-      throw new Error(data.detail ?? "명세서를 분석하지 못했어요.");
-    return data;
+    return api("/api/statements/", { method: "POST", body });
   }
 
   async function loadDemo() {
     setLoading(true);
     setError("");
-    setSourceName("demo_card_2026.csv");
+    setNotice("");
     try {
       const data = await postStatement(
-        new File([demoCsv], "demo_card_2026.csv", { type: "text/csv" }),
+        new File([demoCsv], DEMO_FILENAME, { type: "text/csv" }),
       );
       setOfflineDemo(false);
-      setResult(data);
-    } catch (e) {
+      applyResult(data);
+      if (data.statement.added === 0)
+        setNotice("데모 명세서는 이미 가져왔어요. 새로 추가된 결제는 없어요.");
+    } catch {
       // 백엔드 미실행 상태에서도 프론트 데모를 바로 볼 수 있도록 로컬 예시를 표시합니다.
       setOfflineDemo(true);
       setResult(LOCAL_DEMO);
-      setError("");
     } finally {
       setLoading(false);
     }
   }
 
-  async function uploadStatement(file) {
-    if (!file) return;
+  async function loadDashboard() {
     setLoading(true);
-    setError("");
     try {
-      const data = await postStatement(file);
+      const data = await api("/api/statements/");
+      if (!data.statements.length) return await loadDemo();
       setOfflineDemo(false);
-      setSourceName(file.name);
-      setResult(data);
-    } catch (e) {
-      // 직접 올린 파일은 로컬 데모로 대체하지 않고 실패 이유를 보여줍니다.
-      setError(
-        e instanceof TypeError
-          ? "백엔드에 연결하지 못했어요. 서버가 켜져 있는지 확인해 주세요."
-          : e.message,
-      );
+      applyResult(data);
+    } catch {
+      setOfflineDemo(true);
+      setResult(LOCAL_DEMO);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function uploadStatements(files) {
+    if (!files?.length) return;
+    setLoading(true);
+    setError("");
+    setNotice("");
+    const failed = [];
+    let added = 0;
+    let last = null;
+    for (const file of files) {
+      try {
+        last = await postStatement(file);
+        added += last.statement.added;
+      } catch (e) {
+        failed.push(
+          `${file.name}: ${e instanceof TypeError ? "백엔드에 연결하지 못했어요. 서버가 켜져 있는지 확인해 주세요." : e.message}`,
+        );
+      }
+    }
+    if (last) {
+      setOfflineDemo(false);
+      applyResult(last);
+      setNotice(
+        added
+          ? `명세서 ${files.length - failed.length}개에서 새 결제 ${added}건을 가져왔어요.`
+          : "이미 가져온 결제뿐이라 새로 추가된 내역이 없어요.",
+      );
+    }
+    if (failed.length) setError(failed.join(" / "));
+    setLoading(false);
+  }
+
+  async function deleteStatement(statement) {
+    const ok = window.confirm(
+      `'${statement.filename}'과 그 결제 ${statement.transactions}건을 지울까요?\n다른 명세서의 결제는 그대로 남아요.`,
+    );
+    if (!ok) return;
+    setError("");
+    try {
+      const data = await api(`/api/statements/${statement.id}/`, {
+        method: "DELETE",
+      });
+      if (!data.subscriptions)
+        setResult({ ...data, subscriptions: [], alerts: [], monthly_total: 0 });
+      else applyResult(data);
+      setNotice(`'${statement.filename}'을 지웠어요.`);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function setSubscriptionStatus(sub, status) {
+    if (offlineDemo) {
+      setResult((current) =>
+        finalizeLocal({
+          ...current,
+          subscriptions: current.subscriptions.map((item) =>
+            item.merchant === sub.merchant && item.amount === sub.amount
+              ? {
+                  ...item,
+                  status,
+                  status_changed_on:
+                    status === "cancelled"
+                      ? new Date().toISOString().slice(0, 10)
+                      : null,
+                }
+              : item,
+          ),
+        }),
+      );
+      return;
+    }
+    try {
+      applyResult(
+        await api(
+          "/api/subscriptions/state/",
+          jsonPost({ merchant: sub.merchant, amount: sub.amount, status }),
+        ),
+      );
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function resetDemo() {
+    // 올린 명세서, 후보 선택 결과, 해지 표시를 모두 지워 처음 상태로 되돌립니다.
+    await Promise.all(
+      ["/api/statements/", "/api/merchant-aliases/", "/api/subscriptions/state/"].map(
+        (path) => fetch(path, { method: "DELETE" }).catch(() => {}),
+      ),
+    );
+    window.localStorage.removeItem("dongguma-demo-connected");
+    setResult(null);
+    setOfflineDemo(false);
+    setError("");
+    setNotice("");
+    setScreen("onboarding");
   }
 
   async function connectDemo() {
@@ -225,7 +463,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (screen === "dashboard" && !result) loadDemo();
+    if (screen === "dashboard" && !result) loadDashboard();
   }, [screen]);
 
   if (screen === "onboarding")
@@ -238,14 +476,21 @@ function App() {
     );
 
   const subscriptions = result?.subscriptions ?? [];
-  const needsReview = subscriptions.filter(
-    (s) => s.confidence !== "high",
-  ).length;
+  const current = subscriptions.filter((s) => s.status !== "cancelled");
+  const cancelled = subscriptions.filter((s) => s.status === "cancelled");
+  const alerts = result?.alerts ?? [];
+  const needsReview = current.filter((s) => s.confidence !== "high").length;
+  const statements = result?.statements ?? [];
+  const onlyDemo =
+    statements.length > 0 && statements.every((s) => s.filename === DEMO_FILENAME);
+
+  const scrollTo = (id) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#top" aria-label="돈구마 홈">
+        <a className="brand" href="#top" aria-label="돈구마 맨 위로">
           <span className="brand-mark">
             <img className="brand-logo-image" src="/dongguma-logo.svg" alt="" />
           </span>
@@ -253,25 +498,26 @@ function App() {
         </a>
         <div className="side-label">관리</div>
         <nav className="side-nav" aria-label="메인 메뉴">
-          <a className="nav-item active" href="#overview">
-            <span className="nav-icon">▦</span>한눈에 보기
-          </a>
-          <a className="nav-item" href="#subscriptions">
-            <span className="nav-icon">◷</span>내 구독
-          </a>
-          <a className="nav-item" href="#insights">
-            <span className="nav-icon">⌁</span>새는 돈 알림
-          </a>
+          {NAV_ITEMS.map((item) => (
+            <a
+              key={item.id}
+              className={`nav-item${activeSection === item.id ? " active" : ""}`}
+              href={`#${item.id}`}
+              aria-current={activeSection === item.id ? "true" : undefined}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+              {item.id === "insights" && alerts.length > 0 && (
+                <span className="nav-count">{alerts.length}</span>
+              )}
+            </a>
+          ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="demo-side-card">
             <span className="demo-dot" />
             데모 계정
-            <p>
-              가상 결제 내역을 바탕으로
-              <br />
-              서비스를 둘러보고 있어요.
-            </p>
+            <p>가상 결제 내역으로 서비스를 둘러보고 있어요.</p>
           </div>
           <div className="profile-row">
             <span className="avatar avatar-mascot">
@@ -281,7 +527,6 @@ function App() {
               <b>don_gu_miner</b>
               <small>체험 계정</small>
             </span>
-            <span className="more">···</span>
           </div>
         </div>
       </aside>
@@ -292,29 +537,22 @@ function App() {
             내 금융 <span>/</span> 구독 관리
           </div>
           <div className="top-actions">
-            <button
-              className="replay-onboarding"
-              type="button"
-              onClick={async () => {
-                // 후보 선택 결과(서버에 저장된 매핑)도 지워 처음 상태로 되돌립니다.
-                await fetch("/api/merchant-aliases/", {
-                  method: "DELETE",
-                }).catch(() => {});
-                window.localStorage.removeItem("dongguma-demo-connected");
-                setResult(null);
-                setOfflineDemo(false);
-                setError("");
-                setScreen("onboarding");
-              }}
-            >
-              연동 과정 다시 보기
+            <button className="replay-onboarding" type="button" onClick={resetDemo}>
+              처음부터 다시 보기
             </button>
             <span className="demo-pill">
               <span className="demo-dot" />
               데모 데이터
             </span>
-            <button className="icon-button" type="button" aria-label="알림">
-              ♧<i />
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`알림 ${alerts.length}건 보기`}
+              title="알림 보기"
+              onClick={() => scrollTo("insights")}
+            >
+              <BellIcon />
+              {alerts.length > 0 && <i />}
             </button>
           </div>
         </header>
@@ -337,28 +575,8 @@ function App() {
                 />
               </div>
               <div className="hero-actions">
-                <label
-                  className={`refresh-button upload-button${loading ? " disabled" : ""}`}
-                >
-                  <input
-                    type="file"
-                    accept=".csv"
-                    disabled={loading}
-                    onChange={(e) => {
-                      uploadStatement(e.target.files?.[0]);
-                      e.target.value = "";
-                    }}
-                  />
-                  <span>⇪</span> 내 명세서 올리기
-                </label>
-                <button
-                  className="refresh-button"
-                  type="button"
-                  onClick={loadDemo}
-                  disabled={loading}
-                >
-                  <span className={loading ? "spin" : ""}>↻</span> 데모 다시 찾기
-                </button>
+                <UploadButton loading={loading} onFiles={uploadStatements} primary />
+                <CardIssuerGuide />
               </div>
             </div>
           </section>
@@ -367,17 +585,26 @@ function App() {
             <div className="error-panel offline-panel" role="status">
               <b>CSV 미리보기</b>
               <span>
-                백엔드 연결 전이라 저장소의 demo_card_2026.csv를 브라우저에서
-                분석해 보여드려요.
+                백엔드 연결 전이라 저장소의 {DEMO_FILENAME}를 브라우저에서
+                분석해 보여드려요. 명세서 관리는 서버를 켜야 쓸 수 있어요.
               </span>
+            </div>
+          )}
+          {notice && (
+            <div className="error-panel offline-panel" role="status">
+              <b>알림</b>
+              <span>{notice}</span>
+              <button type="button" onClick={() => setNotice("")}>
+                닫기
+              </button>
             </div>
           )}
           {error && (
             <div className="error-panel" role="alert">
-              <b>데이터를 불러오지 못했어요</b>
+              <b>처리하지 못했어요</b>
               <span>{error}</span>
-              <button type="button" onClick={loadDemo}>
-                데모 데이터 보기
+              <button type="button" onClick={() => setError("")}>
+                닫기
               </button>
             </div>
           )}
@@ -387,6 +614,8 @@ function App() {
           ) : (
             result && (
               <>
+                <AlertsSection alerts={alerts} onReview={() => scrollTo("subscriptions")} />
+
                 <section className="summary-grid" aria-label="구독 요약">
                   <article className="summary-card primary-summary">
                     <div className="summary-label">
@@ -394,7 +623,7 @@ function App() {
                     </div>
                     <strong>{won(result.monthly_total)}</strong>
                     <div className="summary-foot">
-                      <span className="trend-icon">↗</span> 월 기준 예상 지출
+                      해지한 구독을 뺀 월 환산 금액
                     </div>
                     <div className="summary-decoration" aria-hidden="true">
                       ₩
@@ -402,112 +631,133 @@ function App() {
                   </article>
                   <article className="summary-card">
                     <div className="summary-label">
-                      찾은 구독 <span className="mini-icon blue-icon">◷</span>
+                      구독 중 <span className="mini-icon blue-icon">◷</span>
                     </div>
                     <strong>
-                      {subscriptions.length}
+                      {current.length}
                       <small>건</small>
                     </strong>
-                    <div className="summary-foot">여러 결제처에서 모았어요</div>
+                    <div className="summary-foot">
+                      {cancelled.length
+                        ? `해지한 구독 ${cancelled.length}건 제외`
+                        : "여러 결제처에서 모았어요"}
+                    </div>
                   </article>
                   <article className="summary-card coral-summary">
                     <div className="summary-label">
-                      확인할 항목{" "}
-                      <span className="mini-icon coral-icon">!</span>
+                      확인할 항목 <span className="mini-icon coral-icon">!</span>
                     </div>
                     <strong>
                       {needsReview}
                       <small>건</small>
                     </strong>
-                    <div className="summary-foot">
-                      실제 서비스를 확인해 주세요
-                    </div>
+                    <div className="summary-foot">실제 서비스를 확인해 주세요</div>
                   </article>
                 </section>
 
-                <section className="insight-banner" id="insights">
-                  <div className="insight-symbol">✦</div>
-                  <div className="insight-copy">
-                    <span className="insight-kicker">이번 달 체크</span>
-                    <h2>
-                      {needsReview > 0
-                        ? `정체를 확인할 결제가 ${needsReview}건 있어요`
-                        : "모든 결제 출처를 확인했어요"}
-                    </h2>
-                    <p>
-                      PG사와 앱마켓 이름으로 표시된 결제는 실제 서비스 후보를
-                      확인해 보세요.
-                    </p>
-                  </div>
-                  <a href="#subscriptions" className="insight-link">
-                    확인하기 <span>→</span>
-                  </a>
-                </section>
+                <ShareAnalysis subscriptions={current} total={result.monthly_total} />
 
                 <div className="section-heading" id="subscriptions">
                   <div>
                     <p className="eyebrow">YOUR SUBSCRIPTIONS</p>
                     <h2>내 구독</h2>
                   </div>
-                  <span className="list-count">
-                    {subscriptions.length}개 서비스
-                  </span>
+                  <span className="list-count">{current.length}개 서비스</span>
                 </div>
                 <section className="subscription-panel">
                   <div className="table-head">
                     <span>서비스</span>
                     <span>결제 금액</span>
-                    <span>다음 결제일</span>
+                    <span>최근 결제일</span>
                     <span>상태</span>
-                    <span />
+                    <span>해지</span>
                   </div>
-                  {subscriptions.length === 0 ? (
-                    <div className="empty-state">
-                      아직 발견된 구독이 없어요.
-                    </div>
+                  {current.length === 0 ? (
+                    <div className="empty-state">아직 발견된 구독이 없어요.</div>
                   ) : (
-                    subscriptions.map((sub) => (
+                    current.map((sub) => (
                       <Subscription
                         key={`${sub.merchant}-${sub.amount}`}
                         sub={sub}
                         offline={offlineDemo}
-                        onResult={(next, target) => {
+                        onStatus={setSubscriptionStatus}
+                        onConfirmed={(next, target) => {
                           if (offlineDemo && typeof next === "string") {
-                            setResult((current) => ({
-                              ...current,
-                              subscriptions: current.subscriptions.map(
-                                (item) =>
+                            setResult((cur) =>
+                              finalizeLocal({
+                                ...cur,
+                                subscriptions: cur.subscriptions.map((item) =>
                                   item.merchant === target.merchant &&
                                   item.amount === target.amount
                                     ? {
                                         ...item,
                                         service: next,
                                         confidence: "high",
-                                        candidates: [
-                                          { service: next, confidence: "high" },
-                                        ],
-                                        cancel: null,
+                                        candidates: [{ service: next, confidence: "high" }],
+                                        cancel: {
+                                          via: "app",
+                                          url: null,
+                                          host: null,
+                                          verified: false,
+                                          steps: `${next} 앱 > 설정 > 구독·멤버십 관리에서 해지`,
+                                        },
                                       }
                                     : item,
-                              ),
-                            }));
-                          } else setResult(next);
+                                ),
+                              }),
+                            );
+                          } else applyResult(next);
                         }}
                       />
                     ))
                   )}
                 </section>
+                {cancelled.length > 0 && (
+                  <details className="cancelled-panel">
+                    <summary>
+                      해지한 구독 {cancelled.length}개{" "}
+                      <small>명세서를 다시 올려도 목록에 돌아오지 않아요</small>
+                    </summary>
+                    {cancelled.map((sub) => (
+                      <div className="cancelled-row" key={`${sub.merchant}-${sub.amount}`}>
+                        <ServiceMark name={sub.service} />
+                        <div className="service-text">
+                          <b>{sub.service}</b>
+                          <small>
+                            {fullDate(sub.status_changed_on)} 해지 표시 · 마지막 결제{" "}
+                            {fullDate(sub.last_charge_date)}
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => setSubscriptionStatus(sub, "active")}
+                        >
+                          다시 구독 중이에요
+                        </button>
+                      </div>
+                    ))}
+                  </details>
+                )}
+
+                <StatementsSection
+                  statements={statements}
+                  offline={offlineDemo}
+                  loading={loading}
+                  onDelete={deleteStatement}
+                  onFiles={uploadStatements}
+                  onReloadDemo={loadDemo}
+                />
+
                 <footer className="page-footer">
                   <span className="footer-lock">⌑</span>{" "}
-                  {sourceName === "demo_card_2026.csv" ? (
+                  {onlyDemo || offlineDemo ? (
                     <>
-                      실제 금융 정보가 아닌 <b>demo_card_2026.csv</b> 가상 결제
-                      내역을 분석한 데모예요.
+                      실제 금융 정보가 아닌 <b>{DEMO_FILENAME}</b> 가상 결제 내역을
+                      분석한 데모예요.
                     </>
                   ) : (
-                    <>
-                      직접 올린 <b>{sourceName}</b> 결제 내역을 분석했어요.
-                    </>
+                    <>직접 올린 명세서 {statements.length}개의 결제 내역을 분석했어요.</>
                   )}
                 </footer>
               </>
@@ -516,6 +766,221 @@ function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16Z M10 20a2 2 0 0 0 4 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function UploadButton({ loading, onFiles, primary }) {
+  return (
+    <label
+      className={`refresh-button upload-button${primary ? " primary-button" : ""}${loading ? " disabled" : ""}`}
+    >
+      <input
+        type="file"
+        accept=".csv"
+        multiple
+        disabled={loading}
+        onChange={(e) => {
+          onFiles([...(e.target.files ?? [])]);
+          e.target.value = "";
+        }}
+      />
+      <span className={loading ? "spin" : ""}>{loading ? "↻" : "⇪"}</span> 내 명세서
+      올리기
+    </label>
+  );
+}
+
+function CardIssuerGuide() {
+  return (
+    <details className="issuer-guide">
+      <summary className="refresh-button">
+        <span>▤</span> 명세서 받으러 가기
+      </summary>
+      <div className="issuer-menu">
+        <p>
+          카드사 홈페이지 로그인 → <b>이용내역 조회</b> → 기간을 <b>최근 12개월</b>로
+          정하고 <b>엑셀/CSV 다운로드</b>
+        </p>
+        <ul>
+          {CARD_ISSUERS.map((issuer) => (
+            <li key={issuer.name}>
+              <a href={issuer.url} target="_blank" rel="noreferrer">
+                {issuer.name}
+                <small>{hostOf(issuer.url)}</small>
+                <span>↗</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+        <small className="issuer-note">
+          여러 달 치 파일을 한 번에 골라 올릴 수 있어요. 겹치는 결제는 자동으로
+          한 번만 저장돼요.
+        </small>
+      </div>
+    </details>
+  );
+}
+
+function AlertsSection({ alerts, onReview }) {
+  return (
+    <section className="alerts-section" id="insights" aria-label="알림">
+      <div className="section-heading compact">
+        <div>
+          <p className="eyebrow">ALERTS</p>
+          <h2>새로 확인할 알림</h2>
+        </div>
+        <span className="list-count">{alerts.length}건</span>
+      </div>
+      {alerts.length === 0 ? (
+        <div className="alert-card calm">
+          <span className="alert-icon">✓</span>
+          <div>
+            <b>새로 알릴 내용이 없어요</b>
+            <small>금액 변경이나 놓친 결제가 생기면 여기에 먼저 알려드릴게요.</small>
+          </div>
+        </div>
+      ) : (
+        <ul className="alert-list">
+          {alerts.map((alert, index) => {
+            const meta = ALERT_META[alert.type] ?? ALERT_META.needs_review;
+            return (
+              <li className={`alert-card ${meta.tone}`} key={`${alert.type}-${alert.merchant}-${alert.amount}-${index}`}>
+                <span className="alert-icon">{meta.icon}</span>
+                <div>
+                  <span className="alert-kicker">
+                    {meta.label} · {fullDate(alert.date)}
+                  </span>
+                  <b>{alert.message}</b>
+                </div>
+                {alert.type === "needs_review" && (
+                  <button type="button" className="ghost-button" onClick={onReview}>
+                    확인하기 →
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ShareAnalysis({ subscriptions, total }) {
+  const items = subscriptions
+    .filter((s) => s.share != null)
+    .sort((a, b) => b.share - a.share);
+  if (!items.length) return null;
+  return (
+    <section className="analysis-panel" id="analysis">
+      <div className="analysis-head">
+        <div>
+          <p className="eyebrow">SPENDING SHARE</p>
+          <h2>구독료 비중</h2>
+        </div>
+        <small>월 환산 구독료 합계 {won(total)} 대비</small>
+      </div>
+      <div className="share-bar" role="img" aria-label="서비스별 구독료 비중">
+        {items.map((s, i) => (
+          <span
+            key={`${s.merchant}-${s.amount}`}
+            style={{ width: `${s.share}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }}
+            title={`${s.service} ${s.share}%`}
+          />
+        ))}
+      </div>
+      <ol className="share-legend">
+        {items.map((s, i) => (
+          <li key={`${s.merchant}-${s.amount}`}>
+            <i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />
+            <span>{s.service}</span>
+            <b>{s.share}%</b>
+            <small>{won(s.monthly_amount)}</small>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function monthsBetween(start, end) {
+  const [y1, m1] = start.split("-").map(Number);
+  const [y2, m2] = end.split("-").map(Number);
+  return (y2 - y1) * 12 + (m2 - m1) + 1;
+}
+
+function StatementsSection({ statements, offline, loading, onDelete, onFiles, onReloadDemo }) {
+  const starts = statements.map((s) => s.period_start).filter(Boolean).sort();
+  const ends = statements.map((s) => s.period_end).filter(Boolean).sort();
+  const months = starts.length ? monthsBetween(starts[0], ends.at(-1)) : 0;
+  return (
+    <section className="statements-section" id="statements">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">STATEMENTS</p>
+          <h2>가져온 명세서</h2>
+        </div>
+        {months > 0 && (
+          <span className="list-count">
+            {fullDate(starts[0]).slice(0, 7)} ~ {fullDate(ends.at(-1)).slice(0, 7)} · {months}개월치
+          </span>
+        )}
+      </div>
+      {months > 0 && months < 12 && (
+        <p className="coverage-tip">
+          정기 결제 주기를 정확히 판단하려면 <b>12개월치</b>를 권장해요. 지금은{" "}
+          {months}개월치예요. 연간 구독은 1년 이상 이력이 있어야 찾을 수 있어요.
+        </p>
+      )}
+      <div className="statement-panel">
+        {statements.length === 0 ? (
+          <div className="empty-state">아직 가져온 명세서가 없어요.</div>
+        ) : (
+          statements.map((s) => (
+            <div className="statement-row" key={s.id}>
+              <span className="statement-icon">▤</span>
+              <div className="service-text">
+                <b>{s.filename}</b>
+                <small>
+                  {fullDate(s.period_start)} ~ {fullDate(s.period_end)} · 결제{" "}
+                  {s.transactions}건
+                  {s.uploaded_at &&
+                    ` · ${new Date(s.uploaded_at).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })} 업로드`}
+                </small>
+              </div>
+              <button
+                type="button"
+                className="ghost-button danger"
+                disabled={offline}
+                title={offline ? "서버를 켜야 지울 수 있어요" : undefined}
+                onClick={() => onDelete(s)}
+              >
+                삭제
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="statement-actions">
+        <UploadButton loading={loading} onFiles={onFiles} />
+        <button className="refresh-button" type="button" onClick={onReloadDemo} disabled={loading}>
+          <span className={loading ? "spin" : ""}>↻</span> 데모 명세서 다시 불러오기
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -529,12 +994,12 @@ function Onboarding({ connecting, step, onConnect }) {
   return (
     <main className="onboarding-shell">
       <header className="onboarding-header">
-        <a className="onboarding-brand" href="#" aria-label="돈구마">
+        <span className="onboarding-brand">
           <span className="onboarding-brand-mark">
             <img src="/dongguma-logo.svg" alt="" />
           </span>
           돈구마
-        </a>
+        </span>
         <span className="onboarding-demo-tag">
           <i /> 체험용 데모
         </span>
@@ -631,84 +1096,244 @@ function LoadingState() {
   );
 }
 
+// 서비스명(또는 확인 전 가맹점 표기) -> public/logos/<파일>.png
+// 로고는 각 서비스 공식 사이트의 아이콘을 받아 저장해 두었다. 화면을 열 때 외부 서버로 요청하지 않는다.
+// 위에서부터 먼저 맞는 항목을 쓰므로 구체적인 이름(YouTube Music)을 일반적인 이름(YouTube)보다 위에 둔다.
+const SERVICE_LOGOS = [
+  [/youtube\s*music/i, "youtube-music"],
+  [/youtube/i, "youtube"],
+  [/netflix/i, "netflix"],
+  [/spotify/i, "spotify"],
+  [/icloud/i, "icloud"],
+  [/apple\s*music/i, "apple-music"],
+  [/apple\s*tv/i, "apple-tv"],
+  [/naver|네이버/i, "naver"],
+  [/coupang|쿠팡/i, "coupang"],
+  [/disney/i, "disney-plus"],
+  [/canva/i, "canva"],
+  [/capcut/i, "capcut"],
+  [/chatgpt|openai/i, "chatgpt"],
+  [/claude|anthropic/i, "claude"],
+  [/adobe/i, "adobe"],
+  [/microsoft|office/i, "microsoft-365"],
+  [/duolingo/i, "duolingo"],
+  [/perplexity/i, "perplexity"],
+  [/kakao|카카오/i, "kakao"],
+  [/tving|티빙/i, "tving"],
+  [/wavve|웨이브/i, "wavve"],
+  [/watcha|왓챠/i, "watcha"],
+  [/gemini|google\s*ai/i, "gemini"],
+  [/grok/i, "grok"],
+  [/baemin|배민|배달의민족/i, "baemin"],
+  [/class101/i, "class101"],
+  [/ebs/i, "ebs"],
+  [/speak/i, "speak"],
+  [/millie|밀리/i, "millie"],
+  // 서비스를 확인하기 전 앱마켓 묶음 표기
+  [/^apple\.com\/bill/i, "app-store"],
+  [/^google/i, "google-play"],
+];
+
 function ServiceMark({ name }) {
+  const [failed, setFailed] = useState(null);
+  const logo = SERVICE_LOGOS.find(([pattern]) => pattern.test(name || ""))?.[1];
+  if (logo && failed !== logo)
+    return (
+      <span className="service-mark has-logo">
+        <img src={`/logos/${logo}.png`} alt="" onError={() => setFailed(logo)} />
+      </span>
+    );
+  // 로고가 없는 서비스(PG사 표기 등)는 첫 글자로 표시한다.
   const first = (name || "?")
     .replace(/[^A-Za-z가-힣0-9]/g, "")
     .slice(0, 1)
     .toUpperCase();
-  const className = /netflix/i.test(name)
-    ? "netflix"
-    : /apple|icloud/i.test(name)
-      ? "apple"
-      : /spotify/i.test(name)
-        ? "spotify"
-        : /youtube/i.test(name)
-          ? "youtube"
-          : /naver/i.test(name)
-            ? "naver"
-            : /coupang/i.test(name)
-              ? "coupang"
-              : "generic";
-  return <span className={`service-mark ${className}`}>{first}</span>;
+  return <span className="service-mark">{first}</span>;
 }
 
-const CANCEL_LABELS = {
-  web: "해지 안내",
-  google_play: "Google Play",
-  app_store: "App Store",
+const CANCEL_PLACE = {
+  web: "서비스 웹사이트",
+  app_store: "App Store 구독 관리",
+  google_play: "Google Play 정기 결제",
+  app: "서비스 앱",
 };
-function Subscription({ sub, onResult, offline }) {
-  const confirmed = sub.confidence === "high";
-  const changed = sub.price_history?.length > 1;
-  const title = sub.service || sub.merchant;
+
+function CancelAction({ cancel }) {
+  if (!cancel) return <span className="no-action">해지 경로 준비 중</span>;
+  if (!cancel.url)
+    return (
+      <span className="cancel-app" title={cancel.steps}>
+        앱에서 해지
+        <small>웹 해지 불가 · 상세에서 방법 보기</small>
+      </span>
+    );
   return (
-    <article className="subscription-row">
-      <div className="service-cell">
-        <ServiceMark name={title} />
-        <div className="service-text">
-          <b>{title}</b>
-          <small>
-            {sub.service !== sub.merchant
-              ? `명세서 표기 · ${sub.merchant}`
-              : sub.plan || "정기 구독"}
+    <span className="cancel-wrap">
+      <a href={cancel.url} target="_blank" rel="noreferrer" className="cancel-link">
+        해지하러 가기 <span>↗</span>
+      </a>
+      <small className="cancel-host">
+        {cancel.host}
+        {cancel.verified && <em> · 공식 경로</em>}
+      </small>
+    </span>
+  );
+}
+
+function Subscription({ sub, onConfirmed, onStatus, offline }) {
+  const [open, setOpen] = useState(false);
+  const confirmed = sub.confidence === "high";
+  const title = sub.service || sub.merchant;
+  const lapsed = sub.status === "lapsed";
+  return (
+    <article className={`subscription-item${open ? " open" : ""}`}>
+      <div className="subscription-row">
+        <button
+          type="button"
+          className="service-cell service-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <ServiceMark name={title} />
+          <span className="service-text">
+            <b>{title}</b>
+            <small>
+              {sub.service !== sub.merchant
+                ? `명세서 표기 · ${sub.merchant}`
+                : sub.plan || "정기 구독"}
+            </small>
+          </span>
+          <span className="chevron" aria-hidden="true">
+            ⌄
+          </span>
+        </button>
+        <div className="amount-cell">
+          <b>{won(sub.amount)}</b>
+          <small>/{CYCLE_LABELS[sub.cycle] || "월"}</small>
+          {sub.share != null && <span className="share-chip">구독료의 {sub.share}%</span>}
+        </div>
+        <div className="date-cell">
+          <b>{dateLabel(sub.last_charge_date)}</b>
+          <small className={lapsed ? "overdue" : ""}>
+            {lapsed
+              ? `예상일 ${dateLabel(sub.next_payment_date)} 지남`
+              : `다음 결제 예상 · ${dateLabel(sub.next_payment_date)}`}
           </small>
         </div>
+        <div className="status-cell">
+          <span className={`status-badge ${confirmed ? "confirmed" : "review"}`}>
+            <i />
+            {confirmed ? "서비스 확인됨" : "출처 확인 필요"}
+          </span>
+          {lapsed && (
+            <span className="status-badge lapsed">
+              <i />
+              {sub.missed_cycles > 1 ? "결제 끊김" : "결제 확인 안 됨"}
+            </span>
+          )}
+          {sub.recharged_after_cancel && (
+            <span className="status-badge danger">
+              <i />
+              해지 후 결제됨
+            </span>
+          )}
+        </div>
+        <div className="row-action">
+          {confirmed ? (
+            <CancelAction cancel={sub.cancel} />
+          ) : (
+            <ConfirmService sub={sub} offline={offline} onResult={onConfirmed} />
+          )}
+        </div>
       </div>
-      <div className="amount-cell">
-        <b>{won(sub.amount)}</b>
-        <small>/{CYCLE_LABELS[sub.cycle] || "월"}</small>
-        {changed && <span className="price-up">금액 인상</span>}
-      </div>
-      <div className="date-cell">
-        <b>{dateLabel(sub.next_payment_date)}</b>
-        <small>예정</small>
-      </div>
-      <div className="status-cell">
-        <span className={`status-badge ${confirmed ? "confirmed" : "review"}`}>
-          <i />
-          {confirmed ? "확인 완료" : "확인 필요"}
-        </span>
-        {!confirmed && sub.confidence && (
-          <small>{CONFIDENCE_LABELS[sub.confidence]}</small>
-        )}
-      </div>
-      <div className="row-action">
-        {confirmed && sub.cancel ? (
-          <a
-            href={sub.cancel.url}
-            target="_blank"
-            rel="noreferrer"
-            className="cancel-link"
-          >
-            {CANCEL_LABELS[sub.cancel.via] || "해지 안내"} <span>↗</span>
-          </a>
-        ) : !confirmed ? (
-          <ConfirmService sub={sub} offline={offline} onResult={onResult} />
-        ) : (
-          <span className="no-action">안내 준비 중</span>
-        )}
-      </div>
+      {open && <SubscriptionDetail sub={sub} onStatus={onStatus} />}
     </article>
+  );
+}
+
+function SubscriptionDetail({ sub, onStatus }) {
+  const history = sub.price_history ?? [];
+  return (
+    <div className="subscription-detail">
+      <dl className="detail-grid">
+        <div>
+          <dt>첫 결제</dt>
+          <dd>{fullDate(sub.first_charge_date)}</dd>
+        </div>
+        <div>
+          <dt>최근 결제</dt>
+          <dd>{fullDate(sub.last_charge_date)}</dd>
+        </div>
+        <div>
+          <dt>결제 횟수</dt>
+          <dd>{sub.charge_count}회</dd>
+        </div>
+        <div>
+          <dt>다음 결제 (예상)</dt>
+          <dd>{fullDate(sub.next_payment_date)}</dd>
+        </div>
+      </dl>
+      <div className="detail-columns">
+        <div>
+          <h3>금액 이력</h3>
+          <ol className="price-history">
+            {history.map((h) => (
+              <li key={`${h.since}-${h.amount}`}>
+                <span>{fullDate(h.since)}부터</span>
+                <b>{won(h.amount)}</b>
+              </li>
+            ))}
+          </ol>
+          {sub.share != null && (
+            <p className="detail-note">
+              월 환산 구독료 합계 대비 <b>{sub.share}%</b>를 차지해요.
+            </p>
+          )}
+        </div>
+        <div>
+          <h3>해지 방법</h3>
+          {sub.cancel ? (
+            <>
+              <p className="detail-note">
+                {CANCEL_PLACE[sub.cancel.via] ?? "서비스"}에서 해지해요.
+                {sub.cancel.host && (
+                  <>
+                    {" "}
+                    이동할 주소: <b>{sub.cancel.host}</b>
+                    {sub.cancel.verified &&
+                      " (돈구마가 확인한 공식 해지 경로예요)"}
+                  </>
+                )}
+              </p>
+              {sub.cancel.steps && <p className="detail-steps">{sub.cancel.steps}</p>}
+            </>
+          ) : (
+            <p className="detail-note">
+              실제 서비스를 확인하면 해지 경로를 알려드릴게요.
+            </p>
+          )}
+          {sub.evidence?.length > 0 && (
+            <>
+              <h3>판단 근거</h3>
+              <ul className="evidence-list">
+                {sub.evidence.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="detail-actions">
+        <span>
+          이미 해지했다면 표시해 두세요. 다음 명세서를 올리기 전에도 목록과 합계에서
+          빠지고, 나중에 다시 결제되면 알려드려요.
+        </span>
+        <button type="button" className="ghost-button" onClick={() => onStatus(sub, "cancelled")}>
+          해지했어요
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -724,18 +1349,12 @@ function ConfirmService({ sub, onResult, offline }) {
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/merchant-aliases/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          merchant: sub.merchant,
-          amount: sub.amount,
-          service,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "저장하지 못했어요");
-      onResult(data);
+      onResult(
+        await api(
+          "/api/merchant-aliases/",
+          jsonPost({ merchant: sub.merchant, amount: sub.amount, service }),
+        ),
+      );
     } catch (e) {
       setError(e.message || "저장하지 못했어요");
     } finally {

@@ -9,10 +9,28 @@ from analysis.parsers import Transaction as ParsedTransaction
 
 
 class Statement(models.Model):
-    """업로드한 명세서. MVP 는 데모 사용자 1명이라 새 명세서가 이전 업로드 거래를 대체한다."""
+    """업로드한 명세서. 여러 달 치를 쌓아 두고, 잘못 올린 명세서는 하나씩 지울 수 있다.
+
+    이미 저장된 거래와 겹치는 거래는 다시 저장하지 않으므로 기간이 겹치는 명세서를 올려도 된다.
+    """
 
     filename = models.CharField(max_length=255)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at", "-id"]
+
+    def summary(self) -> dict:
+        span = self.transactions.aggregate(start=models.Min("date"), end=models.Max("date"),
+                                           count=models.Count("id"))
+        return {
+            "id": self.id,
+            "filename": self.filename,
+            "uploaded_at": self.uploaded_at.isoformat(),
+            "transactions": span["count"],
+            "period_start": span["start"].isoformat() if span["start"] else None,
+            "period_end": span["end"].isoformat() if span["end"] else None,
+        }
 
 
 class Transaction(models.Model):
@@ -46,6 +64,17 @@ class Transaction(models.Model):
     def to_parsed(self) -> ParsedTransaction:
         return ParsedTransaction(date=self.date, merchant=self.merchant, amount=self.amount,
                                  approval_no=self.approval_no)
+
+    def dedupe_key(self) -> tuple:
+        return (self.date, self.cleaned_merchant, self.amount, self.approval_no)
+
+    @classmethod
+    def coverage_end(cls):
+        """명세서가 덮는 마지막 날짜. 결제가 끊겼는지는 이 날짜까지만 판단한다.
+
+        결제 알림은 일부 카드만 들어오므로 알림 날짜로는 다른 구독의 결제 누락을 판단하지 않는다.
+        """
+        return cls.objects.filter(source=cls.UPLOAD).aggregate(end=models.Max("date"))["end"]
 
     @classmethod
     def all_parsed(cls) -> list[ParsedTransaction]:
@@ -96,6 +125,35 @@ class MerchantAlias(models.Model):
         return {
             (merchant, amount) if amount is not None else merchant: service
             for merchant, amount, service in cls.objects.values_list("cleaned_merchant", "amount", "service")
+        }
+
+
+class SubscriptionState(models.Model):
+    """사용자가 표시한 구독 상태. 결제 이력과 따로 저장해, 명세서를 다시 올려도 해지 표시가 유지된다.
+
+    직접 결제 가맹점은 요금이 바뀌어도 같은 구독이므로 amount 없이 가맹점으로만,
+    PG사·앱마켓은 한 표기 아래 여러 서비스가 섞이므로 가맹점+금액으로 저장한다 (MerchantAlias 와 같은 방식).
+    """
+
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+    STATUSES = [(ACTIVE, "구독 중"), (CANCELLED, "해지함")]
+
+    cleaned_merchant = models.CharField(max_length=255)
+    amount = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES)
+    changed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["cleaned_merchant", "amount"], name="unique_subscription_state")]
+
+    @classmethod
+    def as_dict(cls) -> dict:
+        """analyze() 가 받는 형태: 키 -> (status, 표시한 날짜)."""
+        return {
+            (s.cleaned_merchant, s.amount) if s.amount is not None else s.cleaned_merchant:
+                (s.status, s.changed_at.astimezone().date())
+            for s in cls.objects.all()
         }
 
 

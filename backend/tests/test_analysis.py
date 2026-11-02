@@ -168,7 +168,77 @@ def test_cancel_info_by_payment_channel(demo_transactions, fees):
     subs = {s["service"]: s for s in analyze(demo_transactions, fees)["subscriptions"]}
     assert subs["Speak"]["cancel"]["via"] == "google_play"
     assert subs["iCloud+"]["cancel"]["via"] == "app_store"
-    assert subs["Netflix"]["cancel"] == {"via": "web", "url": "https://help.netflix.com/en/node/407"}
+    assert subs["Netflix"]["cancel"] == {"via": "web", "url": "https://help.netflix.com/en/node/407",
+                                         "host": "help.netflix.com", "verified": True, "steps": None}
+    assert subs["Speak"]["cancel"]["host"] == "play.google.com"
+    assert subs["Speak"]["cancel"]["steps"]
+
+
+def test_cancel_info_without_web_url_gives_app_steps(fees):
+    from analysis.infer import cancel_info
+
+    info = cancel_info("없는서비스", None, fees)
+    assert info["via"] == "app" and info["url"] is None
+    assert "없는서비스" in info["steps"]
+
+
+# --- 구독 상태 · 알림 · 비중 ---
+
+
+def _monthly(merchant, amount, months, day=5, year=2026):
+    return [Transaction(date(year, m, day), merchant, amount) for m in months]
+
+
+def test_demo_subscriptions_are_active_with_share(demo_transactions, fees):
+    result = analyze(demo_transactions, fees)
+    assert {s["status"] for s in result["subscriptions"]} == {"active"}
+    assert sum(s["share"] for s in result["subscriptions"]) == pytest.approx(100, abs=0.5)
+    assert result["as_of"] == max(t.date for t in demo_transactions).isoformat()
+
+
+def test_missed_payment_is_lapsed_not_cancelled(fees):
+    # 1~6월 매달 결제, 7월 결제 없음. 기준일 7/20 이면 예상일 7/5 + 7일이 지났다.
+    txs = _monthly("NETFLIX.COM", 13500, range(1, 7)) + [Transaction(date(2026, 7, 20), "GS25", 1000)]
+    result = analyze(txs, fees)
+    netflix = result["subscriptions"][0]
+    assert (netflix["status"], netflix["missed_cycles"]) == ("lapsed", 1)
+    assert result["monthly_total"] == 13500  # 한 번 빠진 건 잔액 부족일 수도 있어 합계에 남긴다
+    assert any(a["type"] == "lapsed" for a in result["alerts"])
+
+
+def test_long_stopped_subscription_leaves_total(fees):
+    # 1~3월 결제 후 끊김. 첫 명세서에 이미 해지한 구독의 기록이 남아 있는 경우.
+    txs = _monthly("NETFLIX.COM", 13500, range(1, 4)) + [Transaction(date(2026, 9, 30), "GS25", 1000)]
+    result = analyze(txs, fees)
+    assert result["subscriptions"][0]["missed_cycles"] >= 2
+    assert result["monthly_total"] == 0
+
+
+def test_user_cancel_survives_old_charges(fees):
+    txs = _monthly("NETFLIX.COM", 13500, range(1, 7))
+    states = {"NETFLIX.COM": ("cancelled", date(2026, 6, 20))}
+    result = analyze(txs, fees, states=states)
+    netflix = result["subscriptions"][0]
+    assert netflix["status"] == "cancelled"
+    assert netflix["share"] is None
+    assert result["monthly_total"] == 0
+    assert result["alerts"] == []
+
+
+def test_charge_after_cancel_is_flagged(fees):
+    txs = _monthly("NETFLIX.COM", 13500, range(1, 8))
+    states = {"NETFLIX.COM": ("cancelled", date(2026, 6, 20))}
+    result = analyze(txs, fees, states=states)
+    netflix = result["subscriptions"][0]
+    assert netflix["status"] == "active" and netflix["recharged_after_cancel"]
+    assert result["alerts"][0]["type"] == "recharged_after_cancel"
+
+
+def test_price_change_alert(demo_transactions, fees):
+    alerts = analyze(demo_transactions, fees)["alerts"]
+    netflix = next(a for a in alerts if a["type"] == "price_change")
+    assert (netflix["service"], netflix["before"], netflix["after"]) == ("Netflix", 13500, 17000)
+    assert alerts.index(netflix) < next(i for i, a in enumerate(alerts) if a["type"] == "needs_review")
 
 
 def test_no_cancel_until_service_confirmed(demo_transactions, fees):

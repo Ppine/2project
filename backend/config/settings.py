@@ -132,10 +132,29 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["ledger.auth.AgentTokenAuthentication"],
+    # 에이전트·폰 앱은 Bearer 토큰, 웹 대시보드는 로그인 세션(CSRF 확인 포함)
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "ledger.auth.AgentTokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "EXCEPTION_HANDLER": "ledger.exceptions.exception_handler",
     "UNAUTHENTICATED_USER": None,
+    # 회원가입·로그인 시도 횟수 제한 (IP 기준)
+    "DEFAULT_THROTTLE_RATES": {"auth": "10/min"},
 }
+
+# 웹 대시보드 세션. 세션 쿠키는 스크립트가 못 읽고(HttpOnly), 다른 사이트에서 오는 요청에는 붙지 않는다(Lax).
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 2주
+# Vite 개발 서버(5173)가 /api 를 프록시하므로 그 Origin 을 CSRF 신뢰 목록에 둔다.
+# 배포 시 DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com 처럼 추가한다.
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] + [
+    o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+# HTTPS 로 배포하면 DJANGO_SECURE_COOKIES=1 로 쿠키를 HTTPS 에서만 보낸다.
+SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES") == "1"
 
 SERVICE_FEES_CSV = REPO_DIR / "docs" / "service fee modified.csv"

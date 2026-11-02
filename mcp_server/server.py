@@ -5,7 +5,7 @@
 
 환경변수:
     DONGGUMA_API_URL  기본 http://127.0.0.1:8000/api
-    DONGGUMA_TOKEN    `python manage.py issue_token` 으로 발급한 토큰
+    DONGGUMA_TOKEN    `python manage.py issue_token --user <아이디>` 로 발급한 토큰 (그 계정의 데이터만 읽는다)
 """
 
 import os

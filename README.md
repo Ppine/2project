@@ -55,7 +55,8 @@ MCP 도구(예시, 확정 전): `list_subscriptions`, `explain_charge`, `find_le
 
 - 카드번호·계좌번호·금융사 로그인 정보는 저장하지 않는다.
 - 외부 LLM에는 가맹점명·금액·날짜만 보낸다.
-- 에이전트는 사용자가 발급한 토큰으로 읽기 전용 접근만 한다.
+- 에이전트는 사용자가 발급한 토큰으로 읽기 전용 접근만 한다. 토큰은 발급한 계정의 데이터만 읽는다.
+- 웹 대시보드는 로그인해야 쓸 수 있고, 명세서·구독 정보는 계정마다 따로 저장된다.
 
 ## 기획 문서
 
@@ -74,19 +75,21 @@ cp .env.example .env                      # 필요하면 ANTHROPIC_API_KEY 입�
 cd backend
 ../.venv/bin/python manage.py migrate
 ../.venv/bin/python manage.py load_service_fees   # docs/service fee modified.csv → DB
+../.venv/bin/python manage.py create_user demo    # (선택) 발표용 데모 계정. 비밀번호를 입력받음
 ../.venv/bin/python manage.py runserver           # http://127.0.0.1:8000
 
 # 2. 프론트 (새 터미널)
 cd frontend && npm install && npm run dev         # http://localhost:5173
 ```
 
-웹 대시보드에서 `data/demo_card_2026.csv`를 올리고 "분석하기"를 누르면 구독 목록이 나옵니다.
+웹 대시보드에서 회원가입(또는 `create_user` 로 만든 계정으로 로그인)한 뒤 "데모 데이터 연동하기"를 누르면 구독 목록이 나옵니다.
+이전 버전에서 쓰던 데이터는 마이그레이션 때 `demo` 계정으로 옮겨집니다. `create_user demo` 로 비밀번호를 정하면 그 계정으로 볼 수 있습니다.
 데모 데이터는 `python data/generate_demo.py`로 다시 만들 수 있습니다 (정답 라벨: `data/demo_labels.csv`).
 
 ### AI 에이전트 연결 (MCP)
 
 ```bash
-cd backend && ../.venv/bin/python manage.py issue_token claude-desktop   # 토큰은 이때 한 번만 출력됨
+cd backend && ../.venv/bin/python manage.py issue_token claude-desktop --user <아이디>   # 토큰은 이때 한 번만 출력됨
 ```
 
 Claude Desktop의 `claude_desktop_config.json`에 추가 (경로는 본인 환경에 맞게):

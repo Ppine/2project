@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 
+from django.conf import settings
 from django.db import models
 
 from analysis.clean import clean_merchant
@@ -14,6 +15,8 @@ class Statement(models.Model):
     이미 저장된 거래와 겹치는 거래는 다시 저장하지 않으므로 기간이 겹치는 명세서를 올려도 된다.
     """
 
+    # 데이터 주인. 모든 조회는 owner 로 걸러서 다른 사용자의 데이터가 섞이지 않게 한다.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
     filename = models.CharField(max_length=255)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -43,6 +46,8 @@ class Transaction(models.Model):
     NOTIFICATION = "notification"
     SOURCES = [(UPLOAD, "명세서 업로드"), (NOTIFICATION, "결제 알림")]
 
+    # 데이터 주인. 모든 조회는 owner 로 걸러서 다른 사용자의 데이터가 섞이지 않게 한다.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name="transactions", null=True)
     source = models.CharField(max_length=20, choices=SOURCES, default=UPLOAD)
     date = models.DateField()
@@ -51,10 +56,11 @@ class Transaction(models.Model):
     amount = models.IntegerField()
     approval_no = models.CharField(max_length=32, blank=True)
     # 같은 알림을 두 번 보내도 한 건만 저장한다 (앱이 재전송하는 경우)
-    notification_id = models.CharField(max_length=255, unique=True, null=True)
+    notification_id = models.CharField(max_length=255, null=True)
 
     class Meta:
         ordering = ["date", "id"]
+        constraints = [models.UniqueConstraint(fields=["owner", "notification_id"], name="unique_notification")]
 
     @classmethod
     def from_parsed(cls, t: ParsedTransaction, **fields) -> "Transaction":
@@ -69,17 +75,17 @@ class Transaction(models.Model):
         return (self.date, self.cleaned_merchant, self.amount, self.approval_no)
 
     @classmethod
-    def coverage_end(cls):
+    def coverage_end(cls, owner):
         """명세서가 덮는 마지막 날짜. 결제가 끊겼는지는 이 날짜까지만 판단한다.
 
         결제 알림은 일부 카드만 들어오므로 알림 날짜로는 다른 구독의 결제 누락을 판단하지 않는다.
         """
-        return cls.objects.filter(source=cls.UPLOAD).aggregate(end=models.Max("date"))["end"]
+        return cls.objects.filter(owner=owner, source=cls.UPLOAD).aggregate(end=models.Max("date"))["end"]
 
     @classmethod
-    def all_parsed(cls) -> list[ParsedTransaction]:
-        """분석 대상 전체. 명세서에 이미 있는 결제의 알림은 빼서 같은 결제가 두 번 세지지 않게 한다."""
-        rows = list(cls.objects.all())
+    def all_parsed(cls, owner) -> list[ParsedTransaction]:
+        """사용자의 분석 대상 전체. 명세서에 이미 있는 결제의 알림은 빼서 같은 결제가 두 번 세지지 않게 한다."""
+        rows = list(cls.objects.filter(owner=owner))
         uploaded = {(t.date, t.cleaned_merchant, t.amount) for t in rows if t.source == cls.UPLOAD}
         return [
             t.to_parsed()
@@ -112,19 +118,22 @@ class MerchantAlias(models.Model):
     amount 가 있으면 그 금액의 결제에만 적용한다. PG사 표기 하나에 여러 서비스가 섞이기 때문이다.
     """
 
+    # 데이터 주인. 모든 조회는 owner 로 걸러서 다른 사용자의 데이터가 섞이지 않게 한다.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
     cleaned_merchant = models.CharField(max_length=255)
     amount = models.IntegerField(null=True, blank=True)
     service = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["cleaned_merchant", "amount"], name="unique_alias")]
+        constraints = [models.UniqueConstraint(fields=["owner", "cleaned_merchant", "amount"], name="unique_alias")]
 
     @classmethod
-    def as_dict(cls) -> dict:
+    def as_dict(cls, owner) -> dict:
         return {
             (merchant, amount) if amount is not None else merchant: service
-            for merchant, amount, service in cls.objects.values_list("cleaned_merchant", "amount", "service")
+            for merchant, amount, service in cls.objects.filter(owner=owner).values_list(
+                "cleaned_merchant", "amount", "service")
         }
 
 
@@ -139,21 +148,24 @@ class SubscriptionState(models.Model):
     CANCELLED = "cancelled"
     STATUSES = [(ACTIVE, "구독 중"), (CANCELLED, "해지함")]
 
+    # 데이터 주인. 모든 조회는 owner 로 걸러서 다른 사용자의 데이터가 섞이지 않게 한다.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
     cleaned_merchant = models.CharField(max_length=255)
     amount = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUSES)
     changed_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["cleaned_merchant", "amount"], name="unique_subscription_state")]
+        constraints = [models.UniqueConstraint(fields=["owner", "cleaned_merchant", "amount"],
+                                               name="unique_subscription_state")]
 
     @classmethod
-    def as_dict(cls) -> dict:
+    def as_dict(cls, owner) -> dict:
         """analyze() 가 받는 형태: 키 -> (status, 표시한 날짜)."""
         return {
             (s.cleaned_merchant, s.amount) if s.amount is not None else s.cleaned_merchant:
                 (s.status, s.changed_at.astimezone().date())
-            for s in cls.objects.all()
+            for s in cls.objects.filter(owner=owner)
         }
 
 
@@ -161,12 +173,15 @@ class AgentToken(models.Model):
     """API 토큰. 원문은 발급 때 한 번만 보여주고 해시만 저장한다.
 
     read: AI 에이전트(MCP)용 읽기 전용. app: 폰 앱용 — 읽기 + 결제 알림 전송.
+    토큰은 발급한 사용자(owner)의 데이터만 읽고 쓴다.
     """
 
     READ = "read"
     APP = "app"
     SCOPES = [(READ, "읽기 전용"), (APP, "앱 (읽기 + 알림 전송)")]
 
+    # 데이터 주인. 모든 조회는 owner 로 걸러서 다른 사용자의 데이터가 섞이지 않게 한다.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=100)
     scope = models.CharField(max_length=10, choices=SCOPES, default=READ)
     token_hash = models.CharField(max_length=64, unique=True)
@@ -178,10 +193,11 @@ class AgentToken(models.Model):
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @classmethod
-    def issue(cls, name: str, scope: str = READ) -> tuple["AgentToken", str]:
+    def issue(cls, owner, name: str, scope: str = READ) -> tuple["AgentToken", str]:
         raw = "sdn_" + secrets.token_urlsafe(32)
-        return cls.objects.create(name=name, scope=scope, token_hash=cls.hash(raw)), raw
+        return cls.objects.create(owner=owner, name=name, scope=scope, token_hash=cls.hash(raw)), raw
 
     @classmethod
     def verify(cls, raw: str) -> "AgentToken | None":
-        return cls.objects.filter(token_hash=cls.hash(raw), revoked=False).first()
+        return cls.objects.select_related("owner").filter(
+            token_hash=cls.hash(raw), revoked=False, owner__is_active=True).first()

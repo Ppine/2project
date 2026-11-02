@@ -250,12 +250,33 @@ const dateLabel = (value) => {
 };
 const fullDate = (value) => (value ? value.replaceAll("-", ".") : "-");
 
+// Django 가 내려 준 csrftoken 쿠키. 상태를 바꾸는 요청에는 X-CSRFToken 헤더로 함께 보낸다.
+const csrfToken = () =>
+  document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith("csrftoken="))
+    ?.slice("csrftoken=".length) ?? "";
+
+// 세션이 끝나 401이 오면 App 이 로그인 화면으로 돌아가도록 바꿔 끼운다.
+let onAuthLost = () => {};
+
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const method = (options.method ?? "GET").toUpperCase();
+  const headers = { ...(options.headers ?? {}) };
+  if (method !== "GET") headers["X-CSRFToken"] = csrfToken();
+  const response = await fetch(path, { credentials: "same-origin", ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail ?? "요청을 처리하지 못했어요.");
+  if (response.status === 401) onAuthLost();
+  if (!response.ok) {
+    const error = new Error(data.detail ?? "요청을 처리하지 못했어요.");
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
   return data;
 }
+
+const isNetworkError = (e) => e instanceof TypeError;
 
 const jsonPost = (body) => ({
   method: "POST",
@@ -291,11 +312,9 @@ function App() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [offlineDemo, setOfflineDemo] = useState(false);
-  const [screen, setScreen] = useState(() =>
-    window.localStorage.getItem("dongguma-demo-connected") === "true"
-      ? "dashboard"
-      : "onboarding",
-  );
+  // checking -> auth(로그인) -> onboarding(데이터 없음) | dashboard
+  const [screen, setScreen] = useState("checking");
+  const [user, setUser] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [connectStep, setConnectStep] = useState(0);
   const activeSection = useActiveSection(SECTION_IDS, Boolean(result));
@@ -326,28 +345,64 @@ function App() {
       applyResult(data);
       if (data.statement.added === 0)
         setNotice("데모 명세서는 이미 가져왔어요. 새로 추가된 결제는 없어요.");
-    } catch {
-      // 백엔드 미실행 상태에서도 프론트 데모를 바로 볼 수 있도록 로컬 예시를 표시합니다.
-      setOfflineDemo(true);
-      setResult(LOCAL_DEMO);
+    } catch (e) {
+      if (isNetworkError(e)) {
+        // 백엔드 미실행 상태에서도 프론트 데모를 바로 볼 수 있도록 로컬 예시를 표시합니다.
+        setOfflineDemo(true);
+        setResult(LOCAL_DEMO);
+      } else setError(e.message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadDashboard() {
+  function startOffline() {
+    setOfflineDemo(true);
+    setResult(LOCAL_DEMO);
+    setUser({ username: "오프라인 데모", offline: true });
+    setScreen("dashboard");
+  }
+
+  // 로그인한 사용자의 데이터를 불러온다. 아직 명세서가 없으면 연동(온보딩) 화면부터 보여 준다.
+  async function enterApp() {
     setLoading(true);
     try {
       const data = await api("/api/statements/");
-      if (!data.statements.length) return await loadDemo();
       setOfflineDemo(false);
+      if (!data.statements.length) {
+        setResult(null);
+        setScreen("onboarding");
+        return;
+      }
       applyResult(data);
-    } catch {
-      setOfflineDemo(true);
-      setResult(LOCAL_DEMO);
+      setScreen("dashboard");
+    } catch (e) {
+      if (isNetworkError(e)) startOffline();
+      else if (e.status !== 401) setError(e.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function checkSession() {
+    try {
+      const data = await api("/api/auth/me/");
+      setUser(data.user);
+      if (data.user) await enterApp();
+      else setScreen("auth");
+    } catch {
+      startOffline();
+    }
+  }
+
+  async function logout() {
+    if (!offlineDemo) await api("/api/auth/logout/", { method: "POST" }).catch(() => {});
+    setUser(null);
+    setResult(null);
+    setOfflineDemo(false);
+    setError("");
+    setNotice("");
+    setScreen("auth");
   }
 
   async function uploadStatements(files) {
@@ -433,14 +488,17 @@ function App() {
     }
   }
 
-  async function resetDemo() {
-    // 올린 명세서, 후보 선택 결과, 해지 표시를 모두 지워 처음 상태로 되돌립니다.
+  async function resetData() {
+    const ok = window.confirm(
+      "올린 명세서, 확인한 서비스, 해지 표시를 모두 지울까요?\n지운 데이터는 되돌릴 수 없어요.",
+    );
+    if (!ok) return;
+    // 내 계정의 명세서, 후보 선택 결과, 해지 표시를 모두 지워 처음 상태로 되돌립니다.
     await Promise.all(
       ["/api/statements/", "/api/merchant-aliases/", "/api/subscriptions/state/"].map(
-        (path) => fetch(path, { method: "DELETE" }).catch(() => {}),
+        (path) => api(path, { method: "DELETE" }).catch(() => {}),
       ),
     );
-    window.localStorage.removeItem("dongguma-demo-connected");
     setResult(null);
     setOfflineDemo(false);
     setError("");
@@ -457,14 +515,38 @@ function App() {
       setConnectStep(step);
     }
     await loadDemo();
-    window.localStorage.setItem("dongguma-demo-connected", "true");
     setScreen("dashboard");
     setConnecting(false);
   }
 
   useEffect(() => {
-    if (screen === "dashboard" && !result) loadDashboard();
-  }, [screen]);
+    onAuthLost = () => {
+      setUser(null);
+      setResult(null);
+      setScreen("auth");
+    };
+    checkSession();
+    return () => {
+      onAuthLost = () => {};
+    };
+  }, []);
+
+  if (screen === "checking")
+    return (
+      <main className="onboarding-shell">
+        <LoadingState title="로그인 상태를 확인하고 있어요" />
+      </main>
+    );
+
+  if (screen === "auth")
+    return (
+      <AuthScreen
+        onAuthenticated={(nextUser) => {
+          setUser(nextUser);
+          enterApp();
+        }}
+      />
+    );
 
   if (screen === "onboarding")
     return (
@@ -472,6 +554,9 @@ function App() {
         connecting={connecting}
         step={connectStep}
         onConnect={connectDemo}
+        username={user?.username}
+        onLogout={logout}
+        error={error}
       />
     );
 
@@ -514,19 +599,24 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="demo-side-card">
-            <span className="demo-dot" />
-            데모 계정
-            <p>가상 결제 내역으로 서비스를 둘러보고 있어요.</p>
-          </div>
+          {(onlyDemo || offlineDemo) && (
+            <div className="demo-side-card">
+              <span className="demo-dot" />
+              데모 데이터
+              <p>가상 결제 내역으로 서비스를 둘러보고 있어요.</p>
+            </div>
+          )}
           <div className="profile-row">
             <span className="avatar avatar-mascot">
               <img src="/dongguma-logo.svg" alt="" />
             </span>
-            <span>
-              <b>don_gu_miner</b>
-              <small>체험 계정</small>
+            <span className="profile-name">
+              <b>{user?.username}</b>
+              <small>{offlineDemo ? "서버 연결 없음" : "로그인됨"}</small>
             </span>
+            <button type="button" className="logout-button" onClick={logout}>
+              로그아웃
+            </button>
           </div>
         </div>
       </aside>
@@ -537,13 +627,20 @@ function App() {
             내 금융 <span>/</span> 구독 관리
           </div>
           <div className="top-actions">
-            <button className="replay-onboarding" type="button" onClick={resetDemo}>
-              처음부터 다시 보기
+            {!offlineDemo && (
+              <button className="replay-onboarding" type="button" onClick={resetData}>
+                데이터 초기화
+              </button>
+            )}
+            {(onlyDemo || offlineDemo) && (
+              <span className="demo-pill">
+                <span className="demo-dot" />
+                데모 데이터
+              </span>
+            )}
+            <button className="replay-onboarding top-logout" type="button" onClick={logout}>
+              로그아웃
             </button>
-            <span className="demo-pill">
-              <span className="demo-dot" />
-              데모 데이터
-            </span>
             <button
               className="icon-button"
               type="button"
@@ -990,20 +1087,17 @@ const CONNECT_STEPS = [
   "서비스와 다음 결제일을 정리하고 있어요",
 ];
 
-function Onboarding({ connecting, step, onConnect }) {
+function Onboarding({ connecting, step, onConnect, username, onLogout, error }) {
   return (
     <main className="onboarding-shell">
-      <header className="onboarding-header">
-        <span className="onboarding-brand">
-          <span className="onboarding-brand-mark">
-            <img src="/dongguma-logo.svg" alt="" />
-          </span>
-          돈구마
+      <BrandHeader>
+        <span className="onboarding-user">
+          <b>{username}</b>
+          <button type="button" className="replay-onboarding" onClick={onLogout}>
+            로그아웃
+          </button>
         </span>
-        <span className="onboarding-demo-tag">
-          <i /> 체험용 데모
-        </span>
-      </header>
+      </BrandHeader>
       <section className="onboarding-content">
         <div className="onboarding-copy">
           <p className="onboarding-eyebrow">HIDDEN SUBSCRIPTIONS, FOUND</p>
@@ -1057,8 +1151,13 @@ function Onboarding({ connecting, step, onConnect }) {
               데모 데이터 연동하기 <span>→</span>
             </button>
           )}
+          {error && (
+            <p className="auth-error" role="alert">
+              {error}
+            </p>
+          )}
           <p className="onboarding-privacy">
-            <span>⌑</span> 실제 금융 계정 연결 없이 가상 데이터로만 작동해요.
+            <span>⌑</span> 실제 금융 계정 연결 없이 가상 데이터로 먼저 둘러볼 수 있어요.
           </p>
         </div>
         <div className="onboarding-art-wrap">
@@ -1086,13 +1185,146 @@ function Onboarding({ connecting, step, onConnect }) {
   );
 }
 
-function LoadingState() {
+function LoadingState({ title }) {
   return (
     <div className="loading-state">
       <span className="loader" />
-      <b>가상 결제 내역을 분석하고 있어요</b>
-      <span>반복 결제와 서비스 후보를 찾는 중이에요.</span>
+      <b>{title ?? "결제 내역을 분석하고 있어요"}</b>
+      {!title && <span>반복 결제와 서비스 후보를 찾는 중이에요.</span>}
     </div>
+  );
+}
+
+function BrandHeader({ children }) {
+  return (
+    <header className="onboarding-header">
+      <span className="onboarding-brand">
+        <span className="onboarding-brand-mark">
+          <img src="/dongguma-logo.svg" alt="" />
+        </span>
+        돈구마
+      </span>
+      {children}
+    </header>
+  );
+}
+
+function AuthScreen({ onAuthenticated }) {
+  const [mode, setMode] = useState("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [fields, setFields] = useState({});
+  const [busy, setBusy] = useState(false);
+  const signup = mode === "signup";
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setFields({});
+    try {
+      const data = await api(`/api/auth/${mode}/`, jsonPost({ username, password }));
+      setPassword("");
+      onAuthenticated(data.user);
+    } catch (e) {
+      setError(isNetworkError(e) ? "서버에 연결하지 못했어요. 백엔드가 켜져 있는지 확인해 주세요." : e.message);
+      setFields(e.data?.fields ?? {});
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function switchMode() {
+    setMode(signup ? "login" : "signup");
+    setError("");
+    setFields({});
+  }
+
+  return (
+    <main className="onboarding-shell">
+      <BrandHeader />
+      <section className="onboarding-content">
+        <div className="onboarding-copy">
+          <p className="onboarding-eyebrow">{signup ? "CREATE ACCOUNT" : "WELCOME BACK"}</p>
+          <h1>
+            {signup ? (
+              <>
+                내 구독을
+                <br />
+                <em>나만 보게</em> 시작해요
+              </>
+            ) : (
+              <>
+                다시 오셨네요,
+                <br />
+                <em>숨은 돈</em> 찾으러 가요
+              </>
+            )}
+          </h1>
+          <p className="onboarding-description">
+            명세서와 구독 정보는 계정마다 따로 저장되고, 로그인한 본인만 볼 수 있어요.
+          </p>
+          <form className="auth-card" onSubmit={submit} noValidate>
+            <label>
+              아이디
+              <input
+                name="username"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                minLength={3}
+                maxLength={30}
+                aria-invalid={Boolean(fields.username)}
+              />
+              {fields.username && <small className="field-error">{fields.username.join(" ")}</small>}
+              {signup && !fields.username && (
+                <small>3~30자, 영문·숫자와 @ . + - _ 만 쓸 수 있어요.</small>
+              )}
+            </label>
+            <label>
+              비밀번호
+              <input
+                name="password"
+                type="password"
+                autoComplete={signup ? "new-password" : "current-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                aria-invalid={Boolean(fields.password)}
+              />
+              {fields.password && <small className="field-error">{fields.password.join(" ")}</small>}
+              {signup && !fields.password && (
+                <small>8자 이상, 흔하거나 숫자로만 된 비밀번호는 쓸 수 없어요.</small>
+              )}
+            </label>
+            {error && !Object.keys(fields).length && (
+              <p className="auth-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="connect-button" type="submit" disabled={busy || !username || !password}>
+              {busy ? "확인하는 중…" : signup ? "가입하고 시작하기" : "로그인"} <span>→</span>
+            </button>
+          </form>
+          <p className="auth-switch">
+            {signup ? "이미 계정이 있나요?" : "처음이신가요?"}{" "}
+            <button type="button" onClick={switchMode}>
+              {signup ? "로그인" : "회원가입"}
+            </button>
+          </p>
+        </div>
+        <div className="onboarding-art-wrap">
+          <div className="onboarding-art-halo" />
+          <img
+            className="onboarding-mascot"
+            src="/dongguma-mascot-2d.png"
+            alt="돈구마가 호미로 땅을 파서 금화와 지폐를 발견한 모습"
+          />
+        </div>
+      </section>
+    </main>
   );
 }
 

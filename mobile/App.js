@@ -106,7 +106,7 @@ function Setup({ onDone }) {
                  keyboardType="url" />
       <Text style={styles.label}>앱 토큰</Text>
       <TextInput style={styles.input} value={token} onChangeText={setToken} autoCapitalize="none"
-                 placeholder="manage.py issue_token phone --scope app" />
+                 placeholder="manage.py issue_token phone --scope app --user <아이디>" />
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title={checking ? '연결 확인 중…' : '연결하기'} onPress={connect} disabled={checking || !token.trim()} />
     </View>

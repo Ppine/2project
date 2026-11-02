@@ -18,15 +18,9 @@ class AgentTokenAuthentication(authentication.BaseAuthentication):
         token = AgentToken.verify(raw.strip())
         if not token:
             raise exceptions.AuthenticationFailed()
-        return (AgentPrincipal(token), token)
+        # request.user 는 토큰을 발급한 사용자, request.auth 는 토큰. 뷰는 request.user 로 데이터를 거른다.
+        return (token.owner, token)
 
     def authenticate_header(self, request):
         return self.keyword
-
-
-class AgentPrincipal:
-    is_authenticated = True
-
-    def __init__(self, token: AgentToken):
-        self.token = token
 

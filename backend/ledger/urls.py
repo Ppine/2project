@@ -1,8 +1,12 @@
 from django.urls import path
 
-from . import api
+from . import accounts, api
 
 urlpatterns = [
+    path("auth/me/", accounts.MeView.as_view()),
+    path("auth/signup/", accounts.SignupView.as_view()),
+    path("auth/login/", accounts.LoginView.as_view()),
+    path("auth/logout/", accounts.LogoutView.as_view()),
     path("statements/", api.StatementUploadView.as_view()),
     path("statements/<int:statement_id>/", api.StatementDetailView.as_view()),
     path("subscriptions/", api.SubscriptionListView.as_view()),

@@ -72,6 +72,27 @@ button:focus-visible, a:focus-visible, summary:focus-visible, label:focus-within
 .icon-button:hover { background: var(--coral); }
 .icon-button i { position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border: 2px solid var(--white); border-radius: 50%; background: var(--danger); }
 
+.profile-name { min-width: 0; flex: 1; }
+.profile-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logout-button { flex: none; padding: 5px 9px; border: 1px solid #ffffff2e; border-radius: 7px; background: transparent; color: var(--sidebar-ink); font-size: 12px; font-weight: 700; }
+.logout-button:hover { background: #ffffff14; }
+.top-logout { display: none; }
+
+/* Auth */
+.auth-card { display: grid; gap: 14px; width: min(100%, 460px); padding: 18px; border: 1px solid #4a4a4a20; border-radius: 15px; background: #fffffff0; box-shadow: 0 7px 24px #4a4a4a08; }
+.auth-card label { display: grid; gap: 6px; color: var(--navy); font-size: 14px; font-weight: 700; }
+.auth-card input { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid #d9c3c0; border-radius: 10px; background: var(--white); color: var(--ink); font: inherit; font-size: 16px; font-weight: 400; }
+.auth-card input:focus { border-color: var(--mist); outline: 2px solid #e2b4bd88; outline-offset: 0; }
+.auth-card input[aria-invalid="true"] { border-color: var(--danger); }
+.auth-card small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.auth-card small.field-error { color: var(--danger); font-weight: 700; }
+.auth-card .connect-button { margin-top: 2px; width: 100%; }
+.auth-card .connect-button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+.auth-error { margin: 0; padding: 10px 12px; border-radius: 9px; background: #fbe9e6; color: var(--danger); font-size: 14px; font-weight: 700; }
+.auth-switch { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
+.auth-switch button { padding: 0; border: 0; background: none; color: var(--mist); font-weight: 800; text-decoration: underline; }
+.onboarding-user { display: flex; align-items: center; gap: 10px; color: var(--navy); font-size: 14px; }
+
 /* Page */
 .page-content { width: min(100%, 1180px); margin: 0 auto; padding: 30px clamp(20px, 3vw, 40px) 30px; }
 .welcome-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 22px; }
@@ -334,6 +355,7 @@ h1 { margin-bottom: 8px; color: var(--navy); font-size: clamp(40px, 4.5vw, 52px)
   .main-area { margin-left: 0; }
   .topbar { height: 54px; padding: 0 16px; }
   .breadcrumb { display: none; }
+  .top-logout { display: inline-block; }
   .top-actions { width: 100%; justify-content: flex-end; }
   .page-content { padding: 22px 16px 24px; }
   .welcome-row { align-items: flex-start; flex-direction: column; gap: 12px; }

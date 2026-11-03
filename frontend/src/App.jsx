@@ -106,7 +106,6 @@ const SHARE_COLORS = [
   "#d9a3ad",
   "#b9939a",
 ];
-
 const hostOf = (url) => {
   try {
     return new URL(url).hostname;
@@ -284,7 +283,9 @@ const jsonPost = (body) => ({
   body: JSON.stringify(body),
 });
 
-const PAGE_IDS = NAV_ITEMS.map((item) => item.id);
+const ACCOUNT_PAGE = { id: "account", label: "계정 관리" };
+const PAGES = [...NAV_ITEMS, ACCOUNT_PAGE];
+const PAGE_IDS = PAGES.map((item) => item.id);
 
 const pageFromHash = () => {
   const id = window.location.hash.slice(1);
@@ -315,7 +316,7 @@ function useHoverSidebar() {
   };
   const hideSoon = () => {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setOpen(false), 150);
+    closeTimer.current = window.setTimeout(() => setOpen(false), 200);
   };
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
   return { open, setOpen, show, hideSoon };
@@ -521,6 +522,7 @@ function App() {
     setError("");
     setNotice("");
     setScreen("onboarding");
+    window.location.hash = PAGE_IDS[0];
   }
 
   async function connectDemo() {
@@ -592,6 +594,10 @@ function App() {
   const goTo = (id) => {
     window.location.hash = id;
   };
+  // 터치 화면은 호버로 닫을 수 없으니 이동하면서 닫는다
+  const closeSidebarOnTouch = () => {
+    if (window.matchMedia("(hover: none)").matches) sidebar.setOpen(false);
+  };
 
   return (
     <div className={`app-shell${sidebar.open ? " sidebar-open" : ""}`}>
@@ -623,10 +629,7 @@ function App() {
               className={`nav-item${page === item.id ? " active" : ""}`}
               href={`#${item.id}`}
               aria-current={page === item.id ? "page" : undefined}
-              onClick={() => {
-                // 터치 화면은 호버로 닫을 수 없으니 이동하면서 닫는다
-                if (window.matchMedia("(hover: none)").matches) sidebar.setOpen(false);
-              }}
+              onClick={closeSidebarOnTouch}
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
@@ -645,13 +648,21 @@ function App() {
             </div>
           )}
           <div className="profile-row">
-            <span className="avatar avatar-mascot">
-              <img src="/dongguma-logo.svg" alt="" />
-            </span>
-            <span className="profile-name">
-              <b>{user?.username}</b>
-              <small>{offlineDemo ? "서버 연결 없음" : "로그인됨"}</small>
-            </span>
+            <a
+              className={`profile-link${page === ACCOUNT_PAGE.id ? " active" : ""}`}
+              href={`#${ACCOUNT_PAGE.id}`}
+              aria-label={`${user?.username} ${ACCOUNT_PAGE.label}`}
+              aria-current={page === ACCOUNT_PAGE.id ? "page" : undefined}
+              onClick={closeSidebarOnTouch}
+            >
+              <span className="avatar avatar-mascot">
+                <img src="/dongguma-logo.svg" alt="" />
+              </span>
+              <span className="profile-name">
+                <b>{user?.username}</b>
+                <small>{offlineDemo ? "서버 연결 없음" : "로그인됨"}</small>
+              </span>
+            </a>
             <button type="button" className="logout-button" onClick={logout}>
               로그아웃
             </button>
@@ -669,11 +680,17 @@ function App() {
               aria-expanded={sidebar.open}
               aria-controls="app-sidebar"
               onClick={() => sidebar.setOpen((open) => !open)}
+              onPointerEnter={(e) => {
+                if (e.pointerType === "mouse") sidebar.show(); // 터치는 클릭으로만 연다
+              }}
+              onPointerLeave={(e) => {
+                if (e.pointerType === "mouse") sidebar.hideSoon();
+              }}
             >
-              <MenuIcon />
+              <SidebarIcon />
             </button>
             <div className="breadcrumb">
-              내 금융 <span>/</span> {NAV_ITEMS.find((item) => item.id === page).label}
+              내 금융 <span>/</span> {PAGES.find((item) => item.id === page).label}
             </div>
           </div>
           <div className="top-actions">
@@ -688,6 +705,9 @@ function App() {
                 데모 데이터
               </span>
             )}
+            <a className="replay-onboarding top-logout" href={`#${ACCOUNT_PAGE.id}`}>
+              계정
+            </a>
             <button className="replay-onboarding top-logout" type="button" onClick={logout}>
               로그아웃
             </button>
@@ -760,7 +780,15 @@ function App() {
             </div>
           )}
 
-          {loading && !result ? (
+          {page === ACCOUNT_PAGE.id ? (
+            <AccountPage
+              user={user}
+              offline={offlineDemo}
+              statements={statements}
+              onReset={resetData}
+              onLogout={logout}
+            />
+          ) : loading && !result ? (
             <LoadingState />
           ) : (
             result && (
@@ -941,10 +969,168 @@ function App() {
   );
 }
 
-function MenuIcon() {
+function AccountPage({ user, offline, statements, onReset, onLogout }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <section className="account-page">
+      <div className="section-heading compact">
+        <div>
+          <p className="eyebrow">ACCOUNT</p>
+          <h2>{ACCOUNT_PAGE.label}</h2>
+        </div>
+      </div>
+
+      <article className="account-card account-profile">
+        <span className="avatar avatar-mascot account-avatar">
+          <img src="/dongguma-logo.svg" alt="" />
+        </span>
+        <div className="account-profile-text">
+          <b>{user?.username}</b>
+          <small>{offline ? "서버 연결 없음" : "로그인됨"}</small>
+        </div>
+        {!offline && (
+          <dl className="account-facts">
+            <div>
+              <dt>가입일</dt>
+              <dd>{fullDate(user?.date_joined)}</dd>
+            </div>
+            <div>
+              <dt>가져온 명세서</dt>
+              <dd>{statements.length}개</dd>
+            </div>
+          </dl>
+        )}
+      </article>
+
+      {offline ? (
+        <article className="account-card">
+          <h3>서버 연결이 필요해요</h3>
+          <p>비밀번호 변경과 데이터 초기화는 백엔드 서버를 켜고 로그인한 뒤 쓸 수 있어요.</p>
+        </article>
+      ) : (
+        <>
+          <PasswordForm username={user?.username} />
+          <article className="account-card">
+            <h3>데이터 초기화</h3>
+            <p>이 계정의 명세서, 확인한 서비스, 해지 표시를 모두 지워요. 지운 데이터는 되돌릴 수 없어요.</p>
+            <button type="button" className="ghost-button danger" onClick={onReset}>
+              데이터 초기화
+            </button>
+          </article>
+        </>
+      )}
+
+      <article className="account-card">
+        <h3>로그아웃</h3>
+        <p>{offline ? "데모 화면을 닫고 로그인 화면으로 돌아가요." : "이 브라우저에서 로그아웃해요."}</p>
+        <button type="button" className="ghost-button" onClick={onLogout}>
+          로그아웃
+        </button>
+      </article>
+    </section>
+  );
+}
+
+function PasswordForm({ username }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [fields, setFields] = useState({});
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setDone(false);
+    setError("");
+    setFields({});
+    if (next !== confirm) {
+      setFields({ confirm: ["새 비밀번호가 서로 달라요."] });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/auth/password/", {
+        ...jsonPost({ current_password: current, new_password: next }),
+      });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setDone(true);
+    } catch (err) {
+      if (err.data?.fields) setFields(err.data.fields);
+      else setError(isNetworkError(err) ? "서버에 연결하지 못했어요." : err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="account-card auth-card account-password" onSubmit={submit} noValidate>
+      <h3>비밀번호 변경</h3>
+      <input type="text" name="username" autoComplete="username" value={username ?? ""} readOnly hidden />
+      <label>
+        현재 비밀번호
+        <input
+          type="password"
+          name="current-password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          aria-invalid={Boolean(fields.current_password)}
+        />
+        {fields.current_password && <small className="field-error">{fields.current_password.join(" ")}</small>}
+      </label>
+      <label>
+        새 비밀번호
+        <input
+          type="password"
+          name="new-password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          aria-invalid={Boolean(fields.new_password)}
+        />
+        {fields.new_password ? (
+          <small className="field-error">{fields.new_password.join(" ")}</small>
+        ) : (
+          <small>8자 이상, 흔하거나 숫자로만 된 비밀번호는 쓸 수 없어요.</small>
+        )}
+      </label>
+      <label>
+        새 비밀번호 확인
+        <input
+          type="password"
+          name="confirm-password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          aria-invalid={Boolean(fields.confirm)}
+        />
+        {fields.confirm && <small className="field-error">{fields.confirm.join(" ")}</small>}
+      </label>
+      {error && (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      )}
+      {done && (
+        <p className="account-success" role="status">
+          비밀번호를 바꿨어요. 다른 기기에서는 다시 로그인해야 해요.
+        </p>
+      )}
+      <button type="submit" className="ghost-button" disabled={busy || !current || !next || !confirm}>
+        {busy ? "바꾸는 중…" : "비밀번호 변경"}
+      </button>
+    </form>
+  );
+}
+
+function SidebarIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9.5 5v14" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -1102,39 +1288,119 @@ function AlertsDrawer({ open, alerts, onClose, onReview }) {
   );
 }
 
-function ShareAnalysis({ subscriptions, total }) {
+// 색이 8개뿐이라 그보다 많으면 작은 항목을 "기타"로 묶는다.
+function shareItems(subscriptions) {
   const items = subscriptions
     .filter((s) => s.share != null)
-    .sort((a, b) => b.share - a.share);
+    .sort((a, b) => b.share - a.share)
+    .map((s) => ({
+      key: `${s.merchant}-${s.amount}`,
+      name: s.service,
+      share: s.share,
+      amount: s.monthly_amount,
+    }));
+  if (items.length <= SHARE_COLORS.length) return items;
+  const rest = items.slice(SHARE_COLORS.length - 1);
+  const sum = (field) => rest.reduce((total, item) => total + item[field], 0);
+  return [
+    ...items.slice(0, SHARE_COLORS.length - 1),
+    { key: "others", name: `기타 ${rest.length}개`, share: Math.round(sum("share") * 10) / 10, amount: sum("amount") },
+  ];
+}
+
+const PIE_SIZE = 220;
+const PIE_RADIUS = PIE_SIZE / 2 - 2;
+
+function pieSlicePath(from, to) {
+  const center = PIE_SIZE / 2;
+  const point = (ratio) => {
+    const angle = 2 * Math.PI * ratio - Math.PI / 2; // 12시 방향에서 시계 방향으로
+    return `${center + PIE_RADIUS * Math.cos(angle)} ${center + PIE_RADIUS * Math.sin(angle)}`;
+  };
+  const large = to - from > 0.5 ? 1 : 0;
+  return `M ${center} ${center} L ${point(from)} A ${PIE_RADIUS} ${PIE_RADIUS} 0 ${large} 1 ${point(to)} Z`;
+}
+
+function ShareAnalysis({ subscriptions, total }) {
+  const [active, setActive] = useState(null);
+  const [tip, setTip] = useState(null);
+  const items = shareItems(subscriptions);
   if (!items.length) return null;
+  const shareSum = items.reduce((sum, item) => sum + item.share, 0);
+  const slices = items.reduce((list, item, i) => {
+    const from = list.at(-1)?.to ?? 0;
+    return [...list, { ...item, from, to: from + item.share / shareSum, color: SHARE_COLORS[i] }];
+  }, []);
+  const dim = (key) => (active && active !== key ? " dimmed" : "");
+  const activeItem = slices.find((slice) => slice.key === active);
   return (
     <section className="analysis-panel">
       <div className="analysis-head">
         <div>
-          <p className="eyebrow">SPENDING SHARE</p>
-          <h2>구독료 비중</h2>
+          <p className="eyebrow">SUBSCRIPTION ANALYSIS</p>
+          <h2>구독 데이터 분석</h2>
         </div>
         <small>월 환산 구독료 합계 {won(total)} 대비</small>
       </div>
-      <div className="share-bar" role="img" aria-label="서비스별 구독료 비중">
-        {items.map((s, i) => (
-          <span
-            key={`${s.merchant}-${s.amount}`}
-            style={{ width: `${s.share}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }}
-            title={`${s.service} ${s.share}%`}
-          />
-        ))}
+      <div className="share-chart">
+        <div className="share-pie" onPointerLeave={() => setActive(null)}>
+          <svg
+            viewBox={`0 0 ${PIE_SIZE} ${PIE_SIZE}`}
+            role="img"
+            aria-label={`서비스별 구독료 비중: ${slices.map((s) => `${s.name} ${s.share}%`).join(", ")}`}
+            onPointerMove={(e) => {
+              const box = e.currentTarget.getBoundingClientRect();
+              setTip({ x: e.clientX - box.left, y: e.clientY - box.top });
+            }}
+          >
+            {slices.length === 1 ? (
+              <circle
+                cx={PIE_SIZE / 2}
+                cy={PIE_SIZE / 2}
+                r={PIE_RADIUS}
+                fill={slices[0].color}
+                onPointerEnter={() => setActive(slices[0].key)}
+              />
+            ) : (
+              slices.map((slice) => (
+                <path
+                  key={slice.key}
+                  className={`share-slice${dim(slice.key)}`}
+                  d={pieSlicePath(slice.from, slice.to)}
+                  fill={slice.color}
+                  onPointerEnter={() => setActive(slice.key)}
+                />
+              ))
+            )}
+          </svg>
+          {activeItem && tip && (
+            <div className="share-tip" style={{ left: tip.x, top: tip.y }}>
+              <b>{activeItem.name}</b>
+              <span>
+                {activeItem.share}% · {won(activeItem.amount)}
+              </span>
+            </div>
+          )}
+        </div>
+        <ol className="share-legend">
+          {slices.map((slice) => (
+            <li
+              key={slice.key}
+              className={dim(slice.key).trim()}
+              onPointerEnter={() => {
+                setTip(null);
+                setActive(slice.key);
+              }}
+              onPointerLeave={() => setActive(null)}
+            >
+              <i style={{ background: slice.color }} />
+              <span title={slice.name}>{slice.name}</span>
+              <b>{slice.share}%</b>
+              <small>{won(slice.amount)}</small>
+            </li>
+          ))}
+        </ol>
       </div>
-      <ol className="share-legend">
-        {items.map((s, i) => (
-          <li key={`${s.merchant}-${s.amount}`}>
-            <i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />
-            <span>{s.service}</span>
-            <b>{s.share}%</b>
-            <small>{won(s.monthly_amount)}</small>
-          </li>
-        ))}
-      </ol>
     </section>
   );
 }

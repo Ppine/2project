@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import demoCsv from "../../data/demo_card_2026.csv?raw";
 
 const DEMO_FILENAME = "demo_card_2026.csv";
@@ -82,7 +82,7 @@ const CARD_ISSUERS = [
 ];
 
 const NAV_ITEMS = [
-  { id: "overview", icon: "▦", label: "한눈에 보기" },
+  { id: "overview", icon: "▦", label: "대시보드" },
   { id: "insights", icon: "!", label: "알림" },
   { id: "analysis", icon: "◔", label: "소비 분석" },
   { id: "subscriptions", icon: "◷", label: "내 구독" },
@@ -106,7 +106,6 @@ const SHARE_COLORS = [
   "#d9a3ad",
   "#b9939a",
 ];
-
 const hostOf = (url) => {
   try {
     return new URL(url).hostname;
@@ -284,32 +283,50 @@ const jsonPost = (body) => ({
   body: JSON.stringify(body),
 });
 
-function useActiveSection(ids, enabled) {
-  const [active, setActive] = useState(ids[0]);
+const ACCOUNT_PAGE = { id: "account", label: "계정 관리" };
+const PAGES = [...NAV_ITEMS, ACCOUNT_PAGE];
+const PAGE_IDS = PAGES.map((item) => item.id);
+
+const pageFromHash = () => {
+  const id = window.location.hash.slice(1);
+  return PAGE_IDS.includes(id) ? id : PAGE_IDS[0];
+};
+
+// 주소의 해시(#subscriptions 등)가 현재 페이지다. 새로고침·뒤로 가기에도 그대로 유지된다.
+function usePage() {
+  const [page, setPage] = useState(pageFromHash);
   useEffect(() => {
-    if (!enabled) return undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.find((entry) => entry.isIntersecting);
-        if (visible) setActive(visible.target.id);
-      },
-      { rootMargin: "-25% 0px -65% 0px" },
-    );
-    ids.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) observer.observe(el);
-    });
-    return () => observer.disconnect();
-  }, [enabled, ids]);
-  return active;
+    const sync = () => {
+      setPage(pageFromHash());
+      window.scrollTo({ top: 0, behavior: "instant" });
+    };
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  return page;
 }
 
-const SECTION_IDS = NAV_ITEMS.map((item) => item.id);
+// 마우스가 왼쪽 가장자리나 사이드바 위에 있는 동안만 열린다. 지나가다 스친 정도로 닫히지 않게 조금 늦게 닫는다.
+function useHoverSidebar() {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef(null);
+  const show = () => {
+    window.clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const hideSoon = () => {
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), 200);
+  };
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  return { open, setOpen, show, hideSoon };
+}
 
 function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [offlineDemo, setOfflineDemo] = useState(false);
   // checking -> auth(로그인) -> onboarding(데이터 없음) | dashboard
@@ -317,7 +334,8 @@ function App() {
   const [user, setUser] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [connectStep, setConnectStep] = useState(0);
-  const activeSection = useActiveSection(SECTION_IDS, Boolean(result));
+  const page = usePage();
+  const sidebar = useHoverSidebar();
 
   // 서버 응답에 statements가 없으면(구독 상태 변경 등) 기존 목록을 유지한다.
   function applyResult(data) {
@@ -504,6 +522,7 @@ function App() {
     setError("");
     setNotice("");
     setScreen("onboarding");
+    window.location.hash = PAGE_IDS[0];
   }
 
   async function connectDemo() {
@@ -569,13 +588,34 @@ function App() {
   const onlyDemo =
     statements.length > 0 && statements.every((s) => s.filename === DEMO_FILENAME);
 
-  const scrollTo = (id) =>
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  // 대시보드는 모든 섹션을 모아 보여 주고, 각 탭은 자기 섹션만 보여 준다.
+  const showOn = (id) => page === PAGE_IDS[0] || page === id;
+
+  const goTo = (id) => {
+    window.location.hash = id;
+  };
+  // 터치 화면은 호버로 닫을 수 없으니 이동하면서 닫는다
+  const closeSidebarOnTouch = () => {
+    if (window.matchMedia("(hover: none)").matches) sidebar.setOpen(false);
+  };
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <a className="brand" href="#top" aria-label="돈구마 맨 위로">
+    <div className={`app-shell${sidebar.open ? " sidebar-open" : ""}`}>
+      <div className="sidebar-hover-zone" aria-hidden="true" onMouseEnter={sidebar.show} />
+      <aside
+        className="sidebar"
+        id="app-sidebar"
+        onMouseEnter={sidebar.show}
+        onMouseLeave={sidebar.hideSoon}
+        onFocus={(e) => {
+          if (e.target.matches(":focus-visible")) sidebar.show(); // 키보드 Tab 으로 들어올 때
+        }}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget) && !e.currentTarget.matches(":hover"))
+            sidebar.hideSoon();
+        }}
+      >
+        <a className="brand" href={`#${PAGE_IDS[0]}`} aria-label="돈구마 대시보드로">
           <span className="brand-mark">
             <img className="brand-logo-image" src="/dongguma-logo.svg" alt="" />
           </span>
@@ -586,9 +626,10 @@ function App() {
           {NAV_ITEMS.map((item) => (
             <a
               key={item.id}
-              className={`nav-item${activeSection === item.id ? " active" : ""}`}
+              className={`nav-item${page === item.id ? " active" : ""}`}
               href={`#${item.id}`}
-              aria-current={activeSection === item.id ? "true" : undefined}
+              aria-current={page === item.id ? "page" : undefined}
+              onClick={closeSidebarOnTouch}
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
@@ -607,13 +648,21 @@ function App() {
             </div>
           )}
           <div className="profile-row">
-            <span className="avatar avatar-mascot">
-              <img src="/dongguma-logo.svg" alt="" />
-            </span>
-            <span className="profile-name">
-              <b>{user?.username}</b>
-              <small>{offlineDemo ? "서버 연결 없음" : "로그인됨"}</small>
-            </span>
+            <a
+              className={`profile-link${page === ACCOUNT_PAGE.id ? " active" : ""}`}
+              href={`#${ACCOUNT_PAGE.id}`}
+              aria-label={`${user?.username} ${ACCOUNT_PAGE.label}`}
+              aria-current={page === ACCOUNT_PAGE.id ? "page" : undefined}
+              onClick={closeSidebarOnTouch}
+            >
+              <span className="avatar avatar-mascot">
+                <img src="/dongguma-logo.svg" alt="" />
+              </span>
+              <span className="profile-name">
+                <b>{user?.username}</b>
+                <small>{offlineDemo ? "서버 연결 없음" : "로그인됨"}</small>
+              </span>
+            </a>
             <button type="button" className="logout-button" onClick={logout}>
               로그아웃
             </button>
@@ -621,10 +670,28 @@ function App() {
         </div>
       </aside>
 
-      <main className="main-area" id="top">
+      <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumb">
-            내 금융 <span>/</span> 구독 관리
+          <div className="topbar-left">
+            <button
+              className="icon-button menu-button"
+              type="button"
+              aria-label={sidebar.open ? "메뉴 닫기" : "메뉴 열기"}
+              aria-expanded={sidebar.open}
+              aria-controls="app-sidebar"
+              onClick={() => sidebar.setOpen((open) => !open)}
+              onPointerEnter={(e) => {
+                if (e.pointerType === "mouse") sidebar.show(); // 터치는 클릭으로만 연다
+              }}
+              onPointerLeave={(e) => {
+                if (e.pointerType === "mouse") sidebar.hideSoon();
+              }}
+            >
+              <SidebarIcon />
+            </button>
+            <div className="breadcrumb">
+              내 금융 <span>/</span> {PAGES.find((item) => item.id === page).label}
+            </div>
           </div>
           <div className="top-actions">
             {!offlineDemo && (
@@ -638,6 +705,9 @@ function App() {
                 데모 데이터
               </span>
             )}
+            <a className="replay-onboarding top-logout" href={`#${ACCOUNT_PAGE.id}`}>
+              계정
+            </a>
             <button className="replay-onboarding top-logout" type="button" onClick={logout}>
               로그아웃
             </button>
@@ -645,8 +715,10 @@ function App() {
               className="icon-button"
               type="button"
               aria-label={`알림 ${alerts.length}건 보기`}
+              aria-haspopup="dialog"
+              aria-expanded={alertsOpen}
               title="알림 보기"
-              onClick={() => scrollTo("insights")}
+              onClick={() => setAlertsOpen(true)}
             >
               <BellIcon />
               {alerts.length > 0 && <i />}
@@ -654,29 +726,31 @@ function App() {
           </div>
         </header>
 
-        <div className="page-content" id="overview">
-          <section className="welcome-row">
-            <div className="hero-copy">
-              <h1>돈구마</h1>
-              <p className="welcome-copy">
-                <strong className="hero-quote">“땅 파서 돈이 나오냐?”</strong>{" "}
-                돈구마는 결제 땅에서 숨은 돈을 캐낼 수 있습니다!
-              </p>
-            </div>
-            <div className="hero-side">
-              <div className="mascot-stage">
-                <img
-                  className="mascot-image"
-                  src="/dongguma-mascot-2d.png"
-                  alt="돈구마가 호미로 땅을 파서 동전과 지폐를 발견하고 기뻐하는 모습"
-                />
+        <div className="page-content">
+          {page === "overview" && (
+            <section className="welcome-row">
+              <div className="hero-copy">
+                <h1>돈구마</h1>
+                <p className="welcome-copy">
+                  <strong className="hero-quote">“땅 파서 돈이 나오냐?”</strong>{" "}
+                  돈구마는 결제 땅에서 숨은 돈을 캐낼 수 있습니다!
+                </p>
               </div>
-              <div className="hero-actions">
-                <UploadButton loading={loading} onFiles={uploadStatements} primary />
-                <CardIssuerGuide />
+              <div className="hero-side">
+                <div className="mascot-stage">
+                  <img
+                    className="mascot-image"
+                    src="/dongguma-mascot-2d.png"
+                    alt="돈구마가 호미로 땅을 파서 동전과 지폐를 발견하고 기뻐하는 모습"
+                  />
+                </div>
+                <div className="hero-actions">
+                  <UploadButton loading={loading} onFiles={uploadStatements} primary />
+                  <CardIssuerGuide />
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
 
           {offlineDemo && (
             <div className="error-panel offline-panel" role="status">
@@ -706,145 +780,165 @@ function App() {
             </div>
           )}
 
-          {loading && !result ? (
+          {page === ACCOUNT_PAGE.id ? (
+            <AccountPage
+              user={user}
+              offline={offlineDemo}
+              statements={statements}
+              onReset={resetData}
+              onLogout={logout}
+            />
+          ) : loading && !result ? (
             <LoadingState />
           ) : (
             result && (
               <>
-                <AlertsSection alerts={alerts} onReview={() => scrollTo("subscriptions")} />
-
-                <section className="summary-grid" aria-label="구독 요약">
-                  <article className="summary-card primary-summary">
-                    <div className="summary-label">
-                      매달 나가는 구독료 <span className="mini-icon">₩</span>
-                    </div>
-                    <strong>{won(result.monthly_total)}</strong>
-                    <div className="summary-foot">
-                      해지한 구독을 뺀 월 환산 금액
-                    </div>
-                    <div className="summary-decoration" aria-hidden="true">
-                      ₩
-                    </div>
-                  </article>
-                  <article className="summary-card">
-                    <div className="summary-label">
-                      구독 중 <span className="mini-icon blue-icon">◷</span>
-                    </div>
-                    <strong>
-                      {current.length}
-                      <small>건</small>
-                    </strong>
-                    <div className="summary-foot">
-                      {cancelled.length
-                        ? `해지한 구독 ${cancelled.length}건 제외`
-                        : "여러 결제처에서 모았어요"}
-                    </div>
-                  </article>
-                  <article className="summary-card coral-summary">
-                    <div className="summary-label">
-                      확인할 항목 <span className="mini-icon coral-icon">!</span>
-                    </div>
-                    <strong>
-                      {needsReview}
-                      <small>건</small>
-                    </strong>
-                    <div className="summary-foot">실제 서비스를 확인해 주세요</div>
-                  </article>
-                </section>
-
-                <ShareAnalysis subscriptions={current} total={result.monthly_total} />
-
-                <div className="section-heading" id="subscriptions">
-                  <div>
-                    <p className="eyebrow">YOUR SUBSCRIPTIONS</p>
-                    <h2>내 구독</h2>
-                  </div>
-                  <span className="list-count">{current.length}개 서비스</span>
-                </div>
-                <section className="subscription-panel">
-                  <div className="table-head">
-                    <span>서비스</span>
-                    <span>결제 금액</span>
-                    <span>최근 결제일</span>
-                    <span>상태</span>
-                    <span>해지</span>
-                  </div>
-                  {current.length === 0 ? (
-                    <div className="empty-state">아직 발견된 구독이 없어요.</div>
-                  ) : (
-                    current.map((sub) => (
-                      <Subscription
-                        key={`${sub.merchant}-${sub.amount}`}
-                        sub={sub}
-                        offline={offlineDemo}
-                        onStatus={setSubscriptionStatus}
-                        onConfirmed={(next, target) => {
-                          if (offlineDemo && typeof next === "string") {
-                            setResult((cur) =>
-                              finalizeLocal({
-                                ...cur,
-                                subscriptions: cur.subscriptions.map((item) =>
-                                  item.merchant === target.merchant &&
-                                  item.amount === target.amount
-                                    ? {
-                                        ...item,
-                                        service: next,
-                                        confidence: "high",
-                                        candidates: [{ service: next, confidence: "high" }],
-                                        cancel: {
-                                          via: "app",
-                                          url: null,
-                                          host: null,
-                                          verified: false,
-                                          steps: `${next} 앱 > 설정 > 구독·멤버십 관리에서 해지`,
-                                        },
-                                      }
-                                    : item,
-                                ),
-                              }),
-                            );
-                          } else applyResult(next);
-                        }}
-                      />
-                    ))
-                  )}
-                </section>
-                {cancelled.length > 0 && (
-                  <details className="cancelled-panel">
-                    <summary>
-                      해지한 구독 {cancelled.length}개{" "}
-                      <small>명세서를 다시 올려도 목록에 돌아오지 않아요</small>
-                    </summary>
-                    {cancelled.map((sub) => (
-                      <div className="cancelled-row" key={`${sub.merchant}-${sub.amount}`}>
-                        <ServiceMark name={sub.service} />
-                        <div className="service-text">
-                          <b>{sub.service}</b>
-                          <small>
-                            {fullDate(sub.status_changed_on)} 해지 표시 · 마지막 결제{" "}
-                            {fullDate(sub.last_charge_date)}
-                          </small>
-                        </div>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => setSubscriptionStatus(sub, "active")}
-                        >
-                          다시 구독 중이에요
-                        </button>
-                      </div>
-                    ))}
-                  </details>
+                {showOn("insights") && (
+                  <AlertsSection alerts={alerts} onReview={() => goTo("subscriptions")} />
                 )}
 
-                <StatementsSection
-                  statements={statements}
-                  offline={offlineDemo}
-                  loading={loading}
-                  onDelete={deleteStatement}
-                  onFiles={uploadStatements}
-                  onReloadDemo={loadDemo}
-                />
+                {page === "overview" && (
+                  <section className="summary-grid" aria-label="구독 요약">
+                    <article className="summary-card primary-summary">
+                      <div className="summary-label">
+                        매달 나가는 구독료 <span className="mini-icon">₩</span>
+                      </div>
+                      <strong>{won(result.monthly_total)}</strong>
+                      <div className="summary-foot">
+                        해지한 구독을 뺀 월 환산 금액
+                      </div>
+                      <div className="summary-decoration" aria-hidden="true">
+                        ₩
+                      </div>
+                    </article>
+                    <article className="summary-card">
+                      <div className="summary-label">
+                        구독 중 <span className="mini-icon blue-icon">◷</span>
+                      </div>
+                      <strong>
+                        {current.length}
+                        <small>건</small>
+                      </strong>
+                      <div className="summary-foot">
+                        {cancelled.length
+                          ? `해지한 구독 ${cancelled.length}건 제외`
+                          : "여러 결제처에서 모았어요"}
+                      </div>
+                    </article>
+                    <article className="summary-card coral-summary">
+                      <div className="summary-label">
+                        확인할 항목 <span className="mini-icon coral-icon">!</span>
+                      </div>
+                      <strong>
+                        {needsReview}
+                        <small>건</small>
+                      </strong>
+                      <div className="summary-foot">실제 서비스를 확인해 주세요</div>
+                    </article>
+                  </section>
+                )}
+
+                {showOn("analysis") && (
+                  <ShareAnalysis subscriptions={current} total={result.monthly_total} />
+                )}
+
+                {showOn("subscriptions") && (
+                  <>
+                    <div className="section-heading">
+                      <div>
+                        <p className="eyebrow">YOUR SUBSCRIPTIONS</p>
+                        <h2>내 구독</h2>
+                      </div>
+                      <span className="list-count">{current.length}개 서비스</span>
+                    </div>
+                    <section className="subscription-panel">
+                      <div className="table-head">
+                        <span>서비스</span>
+                        <span>결제 금액</span>
+                        <span>최근 결제일</span>
+                        <span>상태</span>
+                        <span>해지</span>
+                      </div>
+                      {current.length === 0 ? (
+                        <div className="empty-state">아직 발견된 구독이 없어요.</div>
+                      ) : (
+                        current.map((sub) => (
+                          <Subscription
+                            key={`${sub.merchant}-${sub.amount}`}
+                            sub={sub}
+                            offline={offlineDemo}
+                            onStatus={setSubscriptionStatus}
+                            onConfirmed={(next, target) => {
+                              if (offlineDemo && typeof next === "string") {
+                                setResult((cur) =>
+                                  finalizeLocal({
+                                    ...cur,
+                                    subscriptions: cur.subscriptions.map((item) =>
+                                      item.merchant === target.merchant &&
+                                      item.amount === target.amount
+                                        ? {
+                                            ...item,
+                                            service: next,
+                                            confidence: "high",
+                                            candidates: [{ service: next, confidence: "high" }],
+                                            cancel: {
+                                              via: "app",
+                                              url: null,
+                                              host: null,
+                                              verified: false,
+                                              steps: `${next} 앱 > 설정 > 구독·멤버십 관리에서 해지`,
+                                            },
+                                          }
+                                        : item,
+                                    ),
+                                  }),
+                                );
+                              } else applyResult(next);
+                            }}
+                          />
+                        ))
+                      )}
+                    </section>
+                    {cancelled.length > 0 && (
+                      <details className="cancelled-panel">
+                        <summary>
+                          해지한 구독 {cancelled.length}개{" "}
+                          <small>명세서를 다시 올려도 목록에 돌아오지 않아요</small>
+                        </summary>
+                        {cancelled.map((sub) => (
+                          <div className="cancelled-row" key={`${sub.merchant}-${sub.amount}`}>
+                            <ServiceMark name={sub.service} />
+                            <div className="service-text">
+                              <b>{sub.service}</b>
+                              <small>
+                                {fullDate(sub.status_changed_on)} 해지 표시 · 마지막 결제{" "}
+                                {fullDate(sub.last_charge_date)}
+                              </small>
+                            </div>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => setSubscriptionStatus(sub, "active")}
+                            >
+                              다시 구독 중이에요
+                            </button>
+                          </div>
+                        ))}
+                      </details>
+                    )}
+                  </>
+                )}
+
+                {showOn("statements") && (
+                  <StatementsSection
+                    statements={statements}
+                    offline={offlineDemo}
+                    loading={loading}
+                    onDelete={deleteStatement}
+                    onFiles={uploadStatements}
+                    onReloadDemo={loadDemo}
+                  />
+                )}
 
                 <footer className="page-footer">
                   <span className="footer-lock">⌑</span>{" "}
@@ -862,7 +956,182 @@ function App() {
           )}
         </div>
       </main>
+      <AlertsDrawer
+        open={alertsOpen}
+        alerts={alerts}
+        onClose={() => setAlertsOpen(false)}
+        onReview={() => {
+          setAlertsOpen(false);
+          goTo("subscriptions");
+        }}
+      />
     </div>
+  );
+}
+
+function AccountPage({ user, offline, statements, onReset, onLogout }) {
+  return (
+    <section className="account-page">
+      <div className="section-heading compact">
+        <div>
+          <p className="eyebrow">ACCOUNT</p>
+          <h2>{ACCOUNT_PAGE.label}</h2>
+        </div>
+      </div>
+
+      <article className="account-card account-profile">
+        <span className="avatar avatar-mascot account-avatar">
+          <img src="/dongguma-logo.svg" alt="" />
+        </span>
+        <div className="account-profile-text">
+          <b>{user?.username}</b>
+          <small>{offline ? "서버 연결 없음" : "로그인됨"}</small>
+        </div>
+        {!offline && (
+          <dl className="account-facts">
+            <div>
+              <dt>가입일</dt>
+              <dd>{fullDate(user?.date_joined)}</dd>
+            </div>
+            <div>
+              <dt>가져온 명세서</dt>
+              <dd>{statements.length}개</dd>
+            </div>
+          </dl>
+        )}
+      </article>
+
+      {offline ? (
+        <article className="account-card">
+          <h3>서버 연결이 필요해요</h3>
+          <p>비밀번호 변경과 데이터 초기화는 백엔드 서버를 켜고 로그인한 뒤 쓸 수 있어요.</p>
+        </article>
+      ) : (
+        <>
+          <PasswordForm username={user?.username} />
+          <article className="account-card">
+            <h3>데이터 초기화</h3>
+            <p>이 계정의 명세서, 확인한 서비스, 해지 표시를 모두 지워요. 지운 데이터는 되돌릴 수 없어요.</p>
+            <button type="button" className="ghost-button danger" onClick={onReset}>
+              데이터 초기화
+            </button>
+          </article>
+        </>
+      )}
+
+      <article className="account-card">
+        <h3>로그아웃</h3>
+        <p>{offline ? "데모 화면을 닫고 로그인 화면으로 돌아가요." : "이 브라우저에서 로그아웃해요."}</p>
+        <button type="button" className="ghost-button" onClick={onLogout}>
+          로그아웃
+        </button>
+      </article>
+    </section>
+  );
+}
+
+function PasswordForm({ username }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [fields, setFields] = useState({});
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setDone(false);
+    setError("");
+    setFields({});
+    if (next !== confirm) {
+      setFields({ confirm: ["새 비밀번호가 서로 달라요."] });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/auth/password/", {
+        ...jsonPost({ current_password: current, new_password: next }),
+      });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setDone(true);
+    } catch (err) {
+      if (err.data?.fields) setFields(err.data.fields);
+      else setError(isNetworkError(err) ? "서버에 연결하지 못했어요." : err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="account-card auth-card account-password" onSubmit={submit} noValidate>
+      <h3>비밀번호 변경</h3>
+      <input type="text" name="username" autoComplete="username" value={username ?? ""} readOnly hidden />
+      <label>
+        현재 비밀번호
+        <input
+          type="password"
+          name="current-password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          aria-invalid={Boolean(fields.current_password)}
+        />
+        {fields.current_password && <small className="field-error">{fields.current_password.join(" ")}</small>}
+      </label>
+      <label>
+        새 비밀번호
+        <input
+          type="password"
+          name="new-password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          aria-invalid={Boolean(fields.new_password)}
+        />
+        {fields.new_password ? (
+          <small className="field-error">{fields.new_password.join(" ")}</small>
+        ) : (
+          <small>8자 이상, 흔하거나 숫자로만 된 비밀번호는 쓸 수 없어요.</small>
+        )}
+      </label>
+      <label>
+        새 비밀번호 확인
+        <input
+          type="password"
+          name="confirm-password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          aria-invalid={Boolean(fields.confirm)}
+        />
+        {fields.confirm && <small className="field-error">{fields.confirm.join(" ")}</small>}
+      </label>
+      {error && (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      )}
+      {done && (
+        <p className="account-success" role="status">
+          비밀번호를 바꿨어요. 다른 기기에서는 다시 로그인해야 해요.
+        </p>
+      )}
+      <button type="submit" className="ghost-button" disabled={busy || !current || !next || !confirm}>
+        {busy ? "바꾸는 중…" : "비밀번호 변경"}
+      </button>
+    </form>
+  );
+}
+
+function SidebarIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9.5 5v14" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
   );
 }
 
@@ -933,7 +1202,7 @@ function CardIssuerGuide() {
 
 function AlertsSection({ alerts, onReview }) {
   return (
-    <section className="alerts-section" id="insights" aria-label="알림">
+    <section className="alerts-section" aria-label="알림">
       <div className="section-heading compact">
         <div>
           <p className="eyebrow">ALERTS</p>
@@ -941,74 +1210,197 @@ function AlertsSection({ alerts, onReview }) {
         </div>
         <span className="list-count">{alerts.length}건</span>
       </div>
-      {alerts.length === 0 ? (
-        <div className="alert-card calm">
-          <span className="alert-icon">✓</span>
-          <div>
-            <b>새로 알릴 내용이 없어요</b>
-            <small>금액 변경이나 놓친 결제가 생기면 여기에 먼저 알려드릴게요.</small>
-          </div>
-        </div>
-      ) : (
-        <ul className="alert-list">
-          {alerts.map((alert, index) => {
-            const meta = ALERT_META[alert.type] ?? ALERT_META.needs_review;
-            return (
-              <li className={`alert-card ${meta.tone}`} key={`${alert.type}-${alert.merchant}-${alert.amount}-${index}`}>
-                <span className="alert-icon">{meta.icon}</span>
-                <div>
-                  <span className="alert-kicker">
-                    {meta.label} · {fullDate(alert.date)}
-                  </span>
-                  <b>{alert.message}</b>
-                </div>
-                {alert.type === "needs_review" && (
-                  <button type="button" className="ghost-button" onClick={onReview}>
-                    확인하기 →
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <AlertList alerts={alerts} onReview={onReview} />
     </section>
   );
 }
 
-function ShareAnalysis({ subscriptions, total }) {
+function AlertList({ alerts, onReview }) {
+  if (alerts.length === 0)
+    return (
+      <div className="alert-card calm">
+        <span className="alert-icon">✓</span>
+        <div>
+          <b>새로 알릴 내용이 없어요</b>
+          <small>금액 변경이나 놓친 결제가 생기면 여기에 먼저 알려드릴게요.</small>
+        </div>
+      </div>
+    );
+  return (
+    <ul className="alert-list">
+      {alerts.map((alert, index) => {
+        const meta = ALERT_META[alert.type] ?? ALERT_META.needs_review;
+        return (
+          <li className={`alert-card ${meta.tone}`} key={`${alert.type}-${alert.merchant}-${alert.amount}-${index}`}>
+            <span className="alert-icon">{meta.icon}</span>
+            <div>
+              <span className="alert-kicker">
+                {meta.label} · {fullDate(alert.date)}
+              </span>
+              <b>{alert.message}</b>
+            </div>
+            {alert.type === "needs_review" && (
+              <button type="button" className="ghost-button" onClick={onReview}>
+                확인하기 →
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// 네이티브 <dialog> 라서 포커스 가두기·Esc 닫기·닫은 뒤 포커스 복귀를 브라우저가 처리한다.
+function AlertsDrawer({ open, alerts, onClose, onReview }) {
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={dialogRef}
+      className="alerts-drawer"
+      aria-labelledby="alerts-drawer-title"
+      onClose={onClose}
+      onClick={(e) => {
+        if (e.target === dialogRef.current) onClose(); // 바깥 어두운 영역 클릭
+      }}
+    >
+      <div className="alerts-drawer-panel">
+        <header className="alerts-drawer-head">
+          <div>
+            <p className="eyebrow">ALERTS</p>
+            <h2 id="alerts-drawer-title">알림</h2>
+          </div>
+          <span className="list-count">{alerts.length}건</span>
+          <button type="button" className="alerts-drawer-close" aria-label="알림 닫기" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="alerts-drawer-body">
+          <AlertList alerts={alerts} onReview={onReview} />
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+// 색이 8개뿐이라 그보다 많으면 작은 항목을 "기타"로 묶는다.
+function shareItems(subscriptions) {
   const items = subscriptions
     .filter((s) => s.share != null)
-    .sort((a, b) => b.share - a.share);
+    .sort((a, b) => b.share - a.share)
+    .map((s) => ({
+      key: `${s.merchant}-${s.amount}`,
+      name: s.service,
+      share: s.share,
+      amount: s.monthly_amount,
+    }));
+  if (items.length <= SHARE_COLORS.length) return items;
+  const rest = items.slice(SHARE_COLORS.length - 1);
+  const sum = (field) => rest.reduce((total, item) => total + item[field], 0);
+  return [
+    ...items.slice(0, SHARE_COLORS.length - 1),
+    { key: "others", name: `기타 ${rest.length}개`, share: Math.round(sum("share") * 10) / 10, amount: sum("amount") },
+  ];
+}
+
+const PIE_SIZE = 220;
+const PIE_RADIUS = PIE_SIZE / 2 - 2;
+
+function pieSlicePath(from, to) {
+  const center = PIE_SIZE / 2;
+  const point = (ratio) => {
+    const angle = 2 * Math.PI * ratio - Math.PI / 2; // 12시 방향에서 시계 방향으로
+    return `${center + PIE_RADIUS * Math.cos(angle)} ${center + PIE_RADIUS * Math.sin(angle)}`;
+  };
+  const large = to - from > 0.5 ? 1 : 0;
+  return `M ${center} ${center} L ${point(from)} A ${PIE_RADIUS} ${PIE_RADIUS} 0 ${large} 1 ${point(to)} Z`;
+}
+
+function ShareAnalysis({ subscriptions, total }) {
+  const [active, setActive] = useState(null);
+  const [tip, setTip] = useState(null);
+  const items = shareItems(subscriptions);
   if (!items.length) return null;
+  const shareSum = items.reduce((sum, item) => sum + item.share, 0);
+  const slices = items.reduce((list, item, i) => {
+    const from = list.at(-1)?.to ?? 0;
+    return [...list, { ...item, from, to: from + item.share / shareSum, color: SHARE_COLORS[i] }];
+  }, []);
+  const dim = (key) => (active && active !== key ? " dimmed" : "");
+  const activeItem = slices.find((slice) => slice.key === active);
   return (
-    <section className="analysis-panel" id="analysis">
+    <section className="analysis-panel">
       <div className="analysis-head">
         <div>
-          <p className="eyebrow">SPENDING SHARE</p>
-          <h2>구독료 비중</h2>
+          <p className="eyebrow">SUBSCRIPTION ANALYSIS</p>
+          <h2>구독 데이터 분석</h2>
         </div>
         <small>월 환산 구독료 합계 {won(total)} 대비</small>
       </div>
-      <div className="share-bar" role="img" aria-label="서비스별 구독료 비중">
-        {items.map((s, i) => (
-          <span
-            key={`${s.merchant}-${s.amount}`}
-            style={{ width: `${s.share}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }}
-            title={`${s.service} ${s.share}%`}
-          />
-        ))}
+      <div className="share-chart">
+        <div className="share-pie" onPointerLeave={() => setActive(null)}>
+          <svg
+            viewBox={`0 0 ${PIE_SIZE} ${PIE_SIZE}`}
+            role="img"
+            aria-label={`서비스별 구독료 비중: ${slices.map((s) => `${s.name} ${s.share}%`).join(", ")}`}
+            onPointerMove={(e) => {
+              const box = e.currentTarget.getBoundingClientRect();
+              setTip({ x: e.clientX - box.left, y: e.clientY - box.top });
+            }}
+          >
+            {slices.length === 1 ? (
+              <circle
+                cx={PIE_SIZE / 2}
+                cy={PIE_SIZE / 2}
+                r={PIE_RADIUS}
+                fill={slices[0].color}
+                onPointerEnter={() => setActive(slices[0].key)}
+              />
+            ) : (
+              slices.map((slice) => (
+                <path
+                  key={slice.key}
+                  className={`share-slice${dim(slice.key)}`}
+                  d={pieSlicePath(slice.from, slice.to)}
+                  fill={slice.color}
+                  onPointerEnter={() => setActive(slice.key)}
+                />
+              ))
+            )}
+          </svg>
+          {activeItem && tip && (
+            <div className="share-tip" style={{ left: tip.x, top: tip.y }}>
+              <b>{activeItem.name}</b>
+              <span>
+                {activeItem.share}% · {won(activeItem.amount)}
+              </span>
+            </div>
+          )}
+        </div>
+        <ol className="share-legend">
+          {slices.map((slice) => (
+            <li
+              key={slice.key}
+              className={dim(slice.key).trim()}
+              onPointerEnter={() => {
+                setTip(null);
+                setActive(slice.key);
+              }}
+              onPointerLeave={() => setActive(null)}
+            >
+              <i style={{ background: slice.color }} />
+              <span title={slice.name}>{slice.name}</span>
+              <b>{slice.share}%</b>
+              <small>{won(slice.amount)}</small>
+            </li>
+          ))}
+        </ol>
       </div>
-      <ol className="share-legend">
-        {items.map((s, i) => (
-          <li key={`${s.merchant}-${s.amount}`}>
-            <i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />
-            <span>{s.service}</span>
-            <b>{s.share}%</b>
-            <small>{won(s.monthly_amount)}</small>
-          </li>
-        ))}
-      </ol>
     </section>
   );
 }
@@ -1024,7 +1416,7 @@ function StatementsSection({ statements, offline, loading, onDelete, onFiles, on
   const ends = statements.map((s) => s.period_end).filter(Boolean).sort();
   const months = starts.length ? monthsBetween(starts[0], ends.at(-1)) : 0;
   return (
-    <section className="statements-section" id="statements">
+    <section className="statements-section">
       <div className="section-heading">
         <div>
           <p className="eyebrow">STATEMENTS</p>

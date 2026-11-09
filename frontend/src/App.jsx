@@ -1155,7 +1155,7 @@ function UploadButton({ loading, onFiles, primary }) {
     >
       <input
         type="file"
-        accept=".csv"
+        accept=".csv,.png,.jpg,.jpeg,.webp,.heic"
         multiple
         disabled={loading}
         onChange={(e) => {

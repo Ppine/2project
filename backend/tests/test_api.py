@@ -425,3 +425,9 @@ def test_csrf_required_for_session_requests(user):
     assert browser.delete("/api/statements/").status_code == 403
     csrf = browser.cookies["csrftoken"].value
     assert browser.delete("/api/statements/", HTTP_X_CSRFTOKEN=csrf).status_code == 200
+
+
+def test_upload_image_without_gemini_key(client):
+    response = upload(client, "capture.png", b"\x89PNG")
+    assert response.status_code == 400
+    assert "GEMINI_API_KEY" in response.json()["reason"]

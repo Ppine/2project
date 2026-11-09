@@ -54,7 +54,7 @@ MCP 도구(예시, 확정 전): `list_subscriptions`, `explain_charge`, `find_le
 ## 개인정보 원칙
 
 - 카드번호·계좌번호·금융사 로그인 정보는 저장하지 않는다.
-- 외부 LLM에는 가맹점명·금액·날짜만 보낸다.
+- 외부 LLM에는 가맹점명·금액·날짜만 보낸다. 단, 사용자가 은행·카드앱 캡처 이미지를 올리면 거래를 읽기 위해 이미지 전체를 Gemini 로 보낸다. 캡처에 찍힌 잔액·계좌번호도 함께 넘어가므로, 이미지 업로드는 사용자가 직접 고른 경우에만 쓰고 CSV 업로드를 기본으로 안내한다.
 - 에이전트는 사용자가 발급한 토큰으로 읽기 전용 접근만 한다.
 - 명세서·구독 정보는 사용자마다 따로 저장하고, 다른 사용자의 데이터와 섞지 않는다.
 
@@ -94,14 +94,14 @@ git switch main && git pull
 
 ```bash
 uv venv .venv && uv pip install -p .venv -r requirements.txt
-cp .env.example .env                              # 처음 한 번. 필요하면 ANTHROPIC_API_KEY 입력
+cp .env.example .env                              # 처음 한 번. 필요하면 GEMINI_API_KEY 입력 (무료)
 cd backend
 ../.venv/bin/python manage.py migrate             # DB 만들기 / 새 마이그레이션 적용
 ../.venv/bin/python manage.py load_service_fees   # 구독료 표(docs/service fee modified.csv) 불러오기
 ../.venv/bin/python manage.py runserver           # http://127.0.0.1:8000
 ```
 
-- `.env` 의 `ANTHROPIC_API_KEY` 는 비워 둬도 됩니다. 비우면 규칙·구독료 표로만 출처를 추론하고 LLM 단계를 건너뜁니다.
+- `.env` 의 `GEMINI_API_KEY` 는 비워 둬도 됩니다. 무료 키는 [Google AI Studio](https://aistudio.google.com/apikey)에서 발급합니다. 비우면 규칙·구독료 표로만 출처를 추론하고 LLM 단계를 건너뜁니다.
 - 코드를 새로 받은 뒤에는 `migrate` 를 다시 실행하세요. 구독료 표를 고쳤다면 `load_service_fees` 도 다시 실행합니다.
 
 ### 4. 프론트 (터미널 2)
@@ -128,6 +128,8 @@ npm run dev        # http://localhost:5173
 7. 화면 폭을 줄여 모바일 레이아웃 확인
 
 데모 데이터는 `python data/generate_demo.py`로 다시 만들 수 있습니다 (정답 라벨: `data/demo_labels.csv`).
+
+형식별 시연 파일 8개(카드 1장, 카드 3장, 카드+계좌이체, 은행앱 캡처 이미지)는 [data/samples](data/samples/README.md)에 있습니다. 파일마다 확인할 거리를 적어 두었습니다. 이미지는 `GEMINI_API_KEY`가 있어야 읽힙니다.
 
 ### 6. 자동 테스트
 

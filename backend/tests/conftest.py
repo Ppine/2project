@@ -14,7 +14,8 @@ FEES_CSV = REPO_DIR / "docs" / "service fee modified.csv"
 @pytest.fixture(autouse=True)
 def no_llm(monkeypatch):
     # 테스트는 외부 API 를 호출하지 않는다.
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture(scope="session")

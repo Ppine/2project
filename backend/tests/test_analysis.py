@@ -268,3 +268,66 @@ def test_frequent_same_price_purchases_are_not_subscription():
     """매일 같은 가격의 커피 중 한 달 간격인 두 잔을 구독으로 오인하지 않는다."""
     txs = [Transaction(date(2026, 5, 1) + timedelta(days=d), "스타벅스", 4500) for d in range(45)]
     assert detect_subscriptions(txs) == []
+
+
+def test_parser_reads_card_and_transfer_mix():
+    data = (
+        "거래일자,구분,결제수단,내용,금액,메모\n"
+        "2026.04.07,카드결제,KB국민 신용 7730,NETFLIX.COM,\"13,500\",\n"
+        "2026.04.21,자동이체,신한 입출금 ***-***-118204,SKT 통신요금,\"49,000\",고정비\n"
+    ).encode()
+    assert parse_statement("mix.csv", data) == [
+        Transaction(date(2026, 4, 7), "NETFLIX.COM", 13500),
+        Transaction(date(2026, 4, 21), "SKT 통신요금", 49000),
+    ]
+
+
+def test_parser_image_keeps_spending_only():
+    calls = []
+
+    def reader(data, mime_type):
+        calls.append(mime_type)
+        return [
+            {"date": "2026-10-15", "merchant": "GOOGLE*YOUTUBE", "amount": 14900},
+            {"date": "2026-10-10", "merchant": "아르바이트 급여", "amount": -820000},  # 입금
+            {"date": "언젠가", "merchant": "깨진 줄", "amount": 1000},  # 잘못 읽힌 줄은 건너뜀
+        ]
+
+    assert parse_statement("capture.PNG", b"img", reader) == [Transaction(date(2026, 10, 15), "GOOGLE*YOUTUBE", 14900)]
+    assert calls == ["image/png"]
+
+
+@pytest.mark.parametrize(
+    "reader, reason",
+    [
+        (None, "GEMINI_API_KEY"),  # 키 없음
+        (lambda data, mime: None, "읽지 못했습니다"),  # Gemini 실패
+        (lambda data, mime: [], "찾지 못했습니다"),  # 거래 목록이 아닌 이미지
+    ],
+)
+def test_parser_image_failures(reader, reason):
+    with pytest.raises(UnsupportedFormat) as e:
+        parse_statement("capture.jpg", b"img", reader)
+    assert reason in e.value.reason
+
+
+def test_gemini_inferer_caches_success_only(monkeypatch):
+    from types import SimpleNamespace
+
+    from analysis.llm import GeminiInferer
+
+    monkeypatch.setattr(GeminiInferer, "_cache", {})
+    replies = [None, '{"candidates": [{"service": "Melon", "confidence": "medium", "reason": "r"}]}']
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        text = replies[len(calls) - 1]
+        return SimpleNamespace(status="completed" if text else "failed", output_text=text)
+
+    inferer = GeminiInferer(client=SimpleNamespace(interactions=SimpleNamespace(create=create)), model="m")
+    args = ("멜론 정기결제", 10900, "monthly", ["2026-04-16", "2026-05-16"], [])
+    assert inferer(*args) == []  # 실패는 캐시하지 않음
+    assert inferer(*args)[0]["service"] == "Melon"
+    assert inferer(*args)[0]["service"] == "Melon"
+    assert len(calls) == 2

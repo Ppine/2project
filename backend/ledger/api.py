@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from analysis.clean import clean_merchant, describe_merchant
 from analysis.infer import analyze, explain_charge
-from analysis.llm import ClaudeInferer
+from analysis.llm import GeminiInferer, GeminiStatementReader
 from analysis.notifications import parse_notification
 from analysis.parsers import UnsupportedFormat, parse_statement
 
@@ -23,7 +23,7 @@ NO_TRANSACTIONS = {"error": "no_transactions", "detail": "아직 수집된 결�
 
 
 def _engine_inputs(owner):
-    return ServiceFee.all_fees(), MerchantAlias.as_dict(owner), ClaudeInferer.from_env()
+    return ServiceFee.all_fees(), MerchantAlias.as_dict(owner), GeminiInferer.from_env()
 
 
 def _analysis(owner) -> dict:
@@ -66,7 +66,7 @@ class StatementUploadView(DashboardView):
         if not upload:
             return Response({"error": "no_file", "detail": "명세서 파일을 선택해 주세요."}, status.HTTP_400_BAD_REQUEST)
         try:
-            parsed = parse_statement(upload.name, upload.read())
+            parsed = parse_statement(upload.name, upload.read(), GeminiStatementReader.from_env())
         except UnsupportedFormat as e:
             return Response(
                 {"error": "unsupported_format", "detail": str(e), "reason": e.reason}, status.HTTP_400_BAD_REQUEST

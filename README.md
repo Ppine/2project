@@ -64,6 +64,8 @@ MCP 도구(예시, 확정 전): `list_subscriptions`, `explain_charge`, `find_le
 
 확장 기능 검토안: [안드로이드 자동 해지 구현 방안](docs/auto-cancellation.md) — 딥링크·화면 자동화·리버스 엔지니어링 활용과 단계별 개발 범위. 기존 분석 MVP와 별도로 검토합니다.
 
+추가 개선 사항: [docs/improvements.md](docs/improvements.md) — Gemini 교체·업로드 형식 확장 이후 남은 과제와 우선순위.
+
 ## 로컬에서 실행하기
 
 팀원 각자 자기 컴퓨터에서 백엔드와 프론트를 띄워 테스트하는 방법입니다. 데이터는 각자의 로컬 DB(`backend/db.sqlite3`)에만 저장되고 Git 에는 올라가지 않습니다.

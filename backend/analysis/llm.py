@@ -40,13 +40,14 @@ SCHEMA = {
 }
 PROMPT = """한국 카드 명세서의 반복 결제 한 건이 실제로 어떤 서비스인지 추정하라.
 가맹점명은 결제대행사(PG사)나 앱마켓 표기일 수 있다. 근거가 약하면 후보를 비워 둬라.
+앱마켓(app_store, google_play) 결제는 수수료 때문에 웹 가격보다 비쌀 수 있다. 공유 대행사(share) 결제는 원가를 여러 명이 나눈 1인분이다.
 후보는 최대 3개, 확신이 없으면 confidence 를 low 로 둔다.
 
 가맹점명: {merchant}
 금액: {amount}원
 주기: {cycle}
 결제일: {dates}
-참고 구독료 목록(서비스, 요금제, 가격): {fees}"""
+참고 구독료 목록(서비스/요금제/가격/결제경로): {fees}"""
 
 
 STATEMENT_SCHEMA = {
@@ -133,7 +134,7 @@ class GeminiInferer:
         key = (self.model, merchant, amount, cycle, tuple(dates))
         if key in self._cache:
             return self._cache[key]
-        fee_lines = [f"{f.service}/{f.plan}/{f.price}{f.currency}" for f in fees]
+        fee_lines = [f"{f.service}/{f.plan}/{f.price}{f.currency}/{f.route or 'web'}" for f in fees]
         prompt = PROMPT.format(
             merchant=merchant, amount=amount, cycle=cycle, dates=", ".join(dates), fees="; ".join(fee_lines)
         )

@@ -102,10 +102,15 @@ class ServiceFee(models.Model):
     cycle = models.CharField(max_length=10)  # monthly | yearly
     note = models.TextField(blank=True)
     cancel_url = models.URLField(max_length=500, blank=True)
+    route = models.CharField(max_length=20, blank=True)  # web | app_store | google_play | share | telecom
+    category = models.CharField(max_length=30, blank=True)
+    max_members = models.PositiveSmallIntegerField(null=True, blank=True)
+    share_platform = models.CharField(max_length=50, blank=True)
 
     def to_fee(self) -> Fee:
         price = int(self.price) if self.price == int(self.price) else float(self.price)
-        return Fee(self.service, self.plan, price, self.currency, self.cycle, self.note, self.cancel_url)
+        return Fee(self.service, self.plan, price, self.currency, self.cycle, self.note, self.cancel_url,
+                   self.route, self.category, self.max_members, self.share_platform)
 
     @classmethod
     def all_fees(cls) -> list[Fee]:

@@ -18,7 +18,8 @@ class Command(BaseCommand):
             ServiceFee.objects.all().delete()
             ServiceFee.objects.bulk_create(
                 ServiceFee(service=f.service, plan=f.plan, price=f.price, currency=f.currency,
-                           cycle=f.cycle, note=f.note, cancel_url=f.cancel_url)
+                           cycle=f.cycle, note=f.note, cancel_url=f.cancel_url, route=f.route,
+                           category=f.category, max_members=f.max_members, share_platform=f.share_platform)
                 for f in fees
             )
         self.stdout.write(self.style.SUCCESS(f"{len(fees)}개 요금제를 불러왔습니다."))

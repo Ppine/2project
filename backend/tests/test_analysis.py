@@ -5,7 +5,7 @@ import pytest
 
 from analysis.clean import describe_merchant
 from analysis.detect import add_months, detect_subscriptions
-from analysis.infer import analyze, explain_charge
+from analysis.infer import Fee, analyze, explain_charge, load_fees
 from analysis.parsers import Transaction, UnsupportedFormat, parse_statement
 
 from .conftest import LABELS_CSV
@@ -55,6 +55,8 @@ def test_parser_reads_cp949():
         ("APPLE.COM/BILL", "APPLE.COM/BILL", "apple", None),
         ("GOOGLE*SPEAK", "GOOGLE", "google", "SPEAK"),
         ("NETFLIX.COM", None, None, None),
+        ("피클플러스", "피클플러스", "share", None),
+        ("이체 김OO", None, None, None),
     ],
 )
 def test_describe_merchant(raw, intermediary, channel, hint):
@@ -342,20 +344,20 @@ def _identify_one(merchant, amount, fees, llm=None):
 
 
 def test_direct_merchant_not_confirmed_by_price_alone(fees):
-    # 멜론 10,900원은 Wavve 스탠다드와 금액만 같다. 이름이 다르므로 확정하지 않는다.
-    sub = _identify_one("멜론 정기결제", 10900, fees)
+    # 헬스장 10,900원은 Wavve 스탠다드와 금액만 같다. 이름이 다르므로 확정하지 않는다.
+    sub = _identify_one("에이블짐 정기결제", 10900, fees)
     assert sub["confidence"] == "low"
-    assert sub["service"] == "멜론 정기결제"
+    assert sub["service"] == "에이블짐 정기결제"
     assert [c["service"] for c in sub["candidates"]] == ["Wavve"]
     assert "가맹점 이름과 맞지 않아" in sub["evidence"][-1]
 
 
 def test_direct_merchant_asks_llm_before_price_guess(fees):
     def fake_llm(merchant, amount, cycle, dates, fees):
-        return [{"service": "Melon", "confidence": "medium", "reason": "가맹점명이 멜론"}]
+        return [{"service": "Able Gym", "confidence": "medium", "reason": "가맹점명이 헬스장"}]
 
-    sub = _identify_one("멜론 정기결제", 10900, fees, llm=fake_llm)
-    assert [c["service"] for c in sub["candidates"]] == ["Melon"]
+    sub = _identify_one("에이블짐 정기결제", 10900, fees, llm=fake_llm)
+    assert [c["service"] for c in sub["candidates"]] == ["Able Gym"]
 
 
 def test_pg_merchant_still_uses_price(fees):
@@ -376,3 +378,92 @@ def test_pg_merchant_still_uses_price(fees):
 def test_direct_merchant_confirmed_by_name(fees, merchant, amount, service, plan):
     sub = _identify_one(merchant, amount, fees)
     assert (sub["service"], sub["plan"], sub["confidence"]) == (service, plan, "high")
+
+
+# --- 결제경로·공유 구독 (구독료 표 확장) ---
+
+
+def test_route_column_overrides_plan_name_guess():
+    # 요금제명에 "iOS" 가 없어도 결제경로 열이 app_store 면 앱마켓 요금이다
+    assert Fee("X", "월간", 1000, "KRW", "monthly", route="app_store").channel == "apple"
+    assert Fee("X", "월간", 1000, "KRW", "monthly", route="share").channel == "share"
+    assert Fee("X", "월간", 1000, "KRW", "monthly", route="telecom").channel is None
+    # 열이 비어 있으면 예전처럼 요금제명으로 추측한다
+    assert Fee("X", "Android 앱 구독", 1000, "KRW", "monthly").channel == "google"
+
+
+def test_old_csv_without_new_columns_still_loads(tmp_path):
+    path = tmp_path / "fees.csv"
+    path.write_text("서비스,요금제,가격,통화,결제주기,비고,해지 관리 URL\nNetflix,프리미엄,17000,KRW,월,,\n",
+                    encoding="utf-8-sig")
+    (fee,) = load_fees(path)
+    assert (fee.route, fee.category, fee.max_members, fee.share_platform) == ("", "", None, "")
+    assert fee.channel is None
+
+
+def test_fee_table_rows_are_consistent(fees):
+    routes = {"web", "app_store", "google_play", "share", "telecom"}
+    for f in fees:
+        assert f.route in routes, f
+        assert f.category, f
+        assert (f.route == "share") == bool(f.share_platform), f
+        assert f.max_members is None or f.max_members >= 2, f
+
+
+def test_app_store_price_matches_only_app_store_billing(fees):
+    # TVING iOS 프리미엄 19,500원 (웹 17,000원 + 앱마켓 수수료)
+    sub = _identify_one("APPLE.COM/BILL", 19500, fees)
+    assert {c["service"] for c in sub["candidates"]} >= {"TVING", "YouTube Premium"}
+    assert all(c["confidence"] == "medium" for c in sub["candidates"])
+    # 같은 금액도 PG사 결제에서는 앱마켓 요금이 후보가 되지 않는다
+    sub = _identify_one("토스페이먼츠", 19500, fees)
+    assert sub["candidates"] == []
+
+
+def test_app_store_plan_preferred_for_named_service(fees):
+    sub = _identify_one("APPLE.COM/BILL *WAVVE", 16000, fees)
+    assert (sub["service"], sub["plan"]) == ("Wavve", "프리미엄(iOS 앱)")
+    assert sub["cancel"]["via"] == "app_store"
+
+
+def test_share_platform_charge_is_identified(fees):
+    sub = _identify_one("피클플러스", 9990, fees)
+    assert (sub["service"], sub["plan"], sub["confidence"]) == ("Netflix", "프리미엄 공유 파티원(피클플러스)", "high")
+    assert any("공유 구독" in e for e in sub["evidence"])
+    # 해지는 넷플릭스가 아니라 대행사에서 파티를 나가야 한다
+    assert sub["cancel"]["via"] == "share"
+    assert sub["cancel"]["host"] == "pickle.plus"
+    assert "파티 나가기" in sub["cancel"]["steps"]
+
+
+def test_share_platform_does_not_match_full_web_price(fees):
+    # 공유 대행사 결제 17,000원을 넷플릭스·티빙 원가로 보지 않는다
+    sub = _identify_one("피클플러스", 17000, fees)
+    assert sub["candidates"] == []
+
+
+def test_split_transfer_is_only_a_low_guess(fees):
+    # 지인에게 매달 4,250원 이체 = 17,000원 프리미엄을 4명이 나눔
+    sub = _identify_one("이체 김OO", 4250, fees)
+    assert sub["confidence"] == "low"
+    assert sub["service"] == "이체 김OO"  # 확정하지 않는다
+    assert {"Netflix", "TVING"} <= {c["service"] for c in sub["candidates"]}
+    assert any("÷ 4명" in e for e in sub["evidence"])
+
+
+def test_split_transfer_allows_rounding(fees):
+    # 17,000원 ÷ 3 = 5,666.7원 -> 5,700원으로 반올림해 보냄
+    sub = _identify_one("이체 김OO", 5700, fees)
+    assert any("÷ 3명" in e for e in sub["evidence"])
+
+
+def test_split_not_applied_to_named_merchant(fees):
+    sub = _identify_one("동네세탁소", 4250, fees)
+    assert sub["candidates"] == []
+
+
+def test_new_korean_merchant_names(fees):
+    sub = _identify_one("멜론 정기결제", 10900, fees)
+    assert (sub["service"], sub["confidence"]) == ("Melon", "high")
+    # 멜론은 App Store 요금만 표에 있다. 직접 결제한 구독에 App Store 해지 링크를 주지 않는다
+    assert sub["cancel"]["via"] == "app"

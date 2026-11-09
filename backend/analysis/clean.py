@@ -18,14 +18,30 @@ APP_MARKETS = {
     "APPLE.COM/BILL": "apple",
     "GOOGLE": "google",
 }
+# 구독 공유 대행사. 여러 명이 한 계정을 나눠 쓰고, 카드에는 대행사 이름으로 1인분(원가 ÷ N + 수수료)이 찍힌다.
+SHARE_PLATFORMS = {
+    "피클플러스": "피클플러스",
+    "PICKLEPLUS": "피클플러스",
+    "PICKLE PLUS": "피클플러스",
+    "링키드": "링키드",
+    "LINKID": "링키드",
+    "벗츠": "벗츠",
+}
+# 사람에게 보낸 이체. 구독을 지인과 1/N 로 나눠 낼 때 이렇게 찍힌다.
+TRANSFER_PREFIXES = ("이체 ", "송금 ", "토스 송금", "카카오페이 송금")
 
 
 @dataclass(frozen=True)
 class MerchantInfo:
     cleaned: str
     intermediary: str | None  # PG사·앱마켓 이름. 직접 결제면 None
-    channel: str | None  # "apple" | "google" | "pg" | None
+    channel: str | None  # "apple" | "google" | "pg" | "share" | None
     hint: str | None  # `GOOGLE*YOUTUBE` 의 YOUTUBE 처럼 중개사 뒤에 붙은 실제 서비스 표기
+
+    @property
+    def is_transfer(self) -> bool:
+        """사람에게 보낸 이체인가 (`이체 박OO`)."""
+        return self.intermediary is None and self.cleaned.startswith(TRANSFER_PREFIXES)
 
 
 def clean_merchant(raw: str) -> str:
@@ -51,6 +67,9 @@ def describe_merchant(raw: str) -> MerchantInfo:
     for prefix, name in PG_ALIASES.items():
         if head.startswith(prefix.upper()):
             return MerchantInfo(cleaned, name, "pg", hint)
+    for prefix, name in SHARE_PLATFORMS.items():
+        if head.startswith(prefix):
+            return MerchantInfo(cleaned, name, "share", hint)
     return MerchantInfo(cleaned, None, None, hint)
 
 

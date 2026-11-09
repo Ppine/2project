@@ -1390,6 +1390,7 @@ const CANCEL_PLACE = {
   app_store: "App Store 구독 관리",
   google_play: "Google Play 정기 결제",
   app: "서비스 앱",
+  share: "공유 구독 대행사",
 };
 
 function CancelAction({ cancel }) {

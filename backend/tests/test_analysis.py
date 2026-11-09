@@ -331,3 +331,48 @@ def test_gemini_inferer_caches_success_only(monkeypatch):
     assert inferer(*args)[0]["service"] == "Melon"
     assert inferer(*args)[0]["service"] == "Melon"
     assert len(calls) == 2
+
+
+# --- 금액 일치는 PG사·앱마켓에서만 확정 근거 ---
+
+
+def _identify_one(merchant, amount, fees, llm=None):
+    (sub,) = analyze(_monthly(merchant, amount, range(1, 5)), fees, llm=llm)["subscriptions"]
+    return sub
+
+
+def test_direct_merchant_not_confirmed_by_price_alone(fees):
+    # 멜론 10,900원은 Wavve 스탠다드와 금액만 같다. 이름이 다르므로 확정하지 않는다.
+    sub = _identify_one("멜론 정기결제", 10900, fees)
+    assert sub["confidence"] == "low"
+    assert sub["service"] == "멜론 정기결제"
+    assert [c["service"] for c in sub["candidates"]] == ["Wavve"]
+    assert "가맹점 이름과 맞지 않아" in sub["evidence"][-1]
+
+
+def test_direct_merchant_asks_llm_before_price_guess(fees):
+    def fake_llm(merchant, amount, cycle, dates, fees):
+        return [{"service": "Melon", "confidence": "medium", "reason": "가맹점명이 멜론"}]
+
+    sub = _identify_one("멜론 정기결제", 10900, fees, llm=fake_llm)
+    assert [c["service"] for c in sub["candidates"]] == ["Melon"]
+
+
+def test_pg_merchant_still_uses_price(fees):
+    sub = _identify_one("토스페이먼츠", 10900, fees)
+    assert (sub["service"], sub["confidence"]) == ("Wavve", "high")
+
+
+@pytest.mark.parametrize(
+    "merchant, amount, service, plan",
+    [
+        ("디즈니플러스", 13900, "Disney+", "프리미엄"),  # 한글 표기
+        ("왓챠", 7900, "WATCHA", "베이직"),
+        ("밀리의서재", 11900, "Millie Library", "전자책 월 정기구독 - 웹"),
+        ("카카오", 3900, "Kakao Emoticon Plus", "웹 구독"),  # 브랜드가 같은 요금 중에서 금액으로
+        ("ADOBE *PHOTOGPHY", 26400, "Adobe", "포토그래피 플랜"),  # 직접 결제는 * 앞도 이름
+    ],
+)
+def test_direct_merchant_confirmed_by_name(fees, merchant, amount, service, plan):
+    sub = _identify_one(merchant, amount, fees)
+    assert (sub["service"], sub["plan"], sub["confidence"]) == (service, plan, "high")

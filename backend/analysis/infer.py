@@ -2,6 +2,9 @@
 
 순서: 사용자 확인 매핑 → 가맹점 표기 속 서비스명 → 구독료 금액 일치 → Gemini.
 결과는 단정이 아니라 후보 + 신뢰도(high/medium/low) + 근거로 낸다.
+
+금액 일치는 PG사·앱마켓처럼 표기가 서비스를 가리는 결제에서만 근거로 쓴다. 직접 결제 가맹점은 이름이 곧
+서비스라서, 이름과 관계없는 요금이 금액만 같다고 그 서비스로 보지 않는다 (예: 멜론 10,900원 ≠ Wavve).
 """
 
 import csv
@@ -37,6 +40,35 @@ KNOWN_MERCHANTS = {
     "YOUTUBEMUSIC": "YouTube Music",
     "OPENAI": "ChatGPT",
     "ANTHROPIC": "Claude",
+    # 한글 표기 (normalize_name 을 거친 형태: 공백·기호 없음)
+    "넷플릭스": "Netflix",
+    "디즈니": "Disney+",
+    "티빙": "TVING",
+    "웨이브": "Wavve",
+    "왓챠": "WATCHA",
+    "유튜브프리미엄": "YouTube Premium",
+    "유튜브뮤직": "YouTube Music",
+    "스포티파이": "Spotify",
+    "애플뮤직": "Apple Music",
+    "밀리의서재": "Millie Library",
+    "배민클럽": "Baemin Club",
+    "클래스101": "CLASS101+",
+    "듀오링고": "Duolingo",
+    "캔바": "Canva",
+    "캡컷": "CapCut",
+    "퍼플렉시티": "Perplexity",
+    "챗GPT": "ChatGPT",
+    "챗지피티": "ChatGPT",
+}
+# 서비스가 여럿인 브랜드의 한글 표기 -> 구독료 표 서비스명의 첫 단어. `카카오` 3,900원은 Kakao 계열 요금 중에서만 찾는다.
+BRAND_ALIASES = {
+    "카카오": "KAKAO",
+    "애플": "APPLE",
+    "구글": "GOOGLE",
+    "어도비": "ADOBE",
+    "마이크로소프트": "MICROSOFT",
+    "네이버": "NAVER",
+    "유튜브": "YOUTUBE",
 }
 
 
@@ -96,12 +128,19 @@ def identify(sub: Recurring, fees: list[Fee], aliases: dict | None = None, llm=N
     if service:
         return _result([_candidate(service, _plan_for(service, sub, fees), "high")], ["사용자가 확인한 매핑", count])
 
-    service = _service_from_name(merchant.hint or merchant.cleaned, fees)
+    # PG사·앱마켓은 `GOOGLE*YOUTUBE` 의 YOUTUBE 처럼 * 뒤가 서비스명이고, 직접 결제는 표기 전체가 이름이다
+    # (`ADOBE *PHOTOGPHY` 는 ADOBE 쪽이 서비스명).
+    name = (merchant.hint or merchant.cleaned) if merchant.intermediary else merchant.cleaned
+    service = _service_from_name(name, fees)
     if service:
         evidence = [f"가맹점 표기 '{merchant.cleaned}'에 서비스명 포함", count]
         return _result([_candidate(service, _plan_for(service, sub, fees), "high")], evidence)
 
     matches = _price_matches(sub.amount, sub.cycle, merchant.channel, fees)
+    unrelated = []
+    if not merchant.intermediary:
+        unrelated = [f for f in matches if not _same_brand(merchant.cleaned, f.service)]
+        matches = [f for f in matches if f not in unrelated]
     services = sorted({f.service for f in matches})
     if services:
         confidence = "high" if len(services) == 1 else "medium"
@@ -119,6 +158,12 @@ def identify(sub: Recurring, fees: list[Fee], aliases: dict | None = None, llm=N
             candidates = [_candidate(g["service"], None, g["confidence"]) for g in guessed]
             evidence = [count] + [f"LLM 추론: {g['reason']}" for g in guessed]
             return _result(candidates, evidence)
+
+    if unrelated:
+        candidates = [_candidate(f.service, f.plan, "low") for f in unrelated]
+        names = ", ".join(f"{f.service} {f.plan}" for f in unrelated)
+        evidence = [count, f"금액 {sub.amount:,}원이 {names} 요금과 같지만 가맹점 이름과 맞지 않아 단정하지 않음"]
+        return _result(candidates, evidence)
 
     return _result([], [count, "알려진 구독료·가맹점 표기와 일치하는 서비스가 없음"])
 
@@ -301,6 +346,13 @@ def _service_from_name(text: str, fees: list[Fee]) -> str | None:
         if normalize_name(service) in key:
             return service
     return None
+
+
+def _same_brand(merchant: str, service: str) -> bool:
+    """가맹점 이름에 서비스 브랜드(서비스명 첫 단어)가 들어 있는가. `카카오` ↔ `Kakao Emoticon Plus`."""
+    key = normalize_name(merchant)
+    brand = normalize_name(service.split()[0])
+    return brand in key or any(alias in key for alias, b in BRAND_ALIASES.items() if b == brand)
 
 
 def _price_matches(amount: int, cycle: str, channel: str | None, fees: list[Fee]) -> list[Fee]:

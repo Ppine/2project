@@ -1733,7 +1733,7 @@ const SERVICE_LOGOS = [
   [/apple\s*tv/i, "apple-tv"],
   [/naver|네이버/i, "naver"],
   [/coupang|쿠팡/i, "coupang"],
-  [/disney/i, "disney-plus"],
+  [/disney|디즈니/i, "disney-plus"],
   [/canva/i, "canva"],
   [/capcut/i, "capcut"],
   [/chatgpt|openai/i, "chatgpt"],
@@ -1753,6 +1753,8 @@ const SERVICE_LOGOS = [
   [/ebs/i, "ebs"],
   [/speak/i, "speak"],
   [/millie|밀리/i, "millie"],
+  // 통신비 자동이체 (T world 아이콘)
+  [/\bskt\b|sk\s*텔레콤|sk\s*telecom/i, "skt"],
   // 서비스를 확인하기 전 앱마켓 묶음 표기
   [/^apple\.com\/bill/i, "app-store"],
   [/^google/i, "google-play"],

@@ -54,3 +54,6 @@ logs/
 coverage/
 .coverage
 htmlcov/
+
+# ===== Android / Gradle =====
+.gradle/

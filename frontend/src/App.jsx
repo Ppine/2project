@@ -97,14 +97,14 @@ const ALERT_META = {
 };
 
 const SHARE_COLORS = [
-  "#4a4a4a",
-  "#8a5f69",
-  "#c98a96",
-  "#e2b4bd",
-  "#a7737e",
-  "#6b5b5b",
-  "#d9a3ad",
-  "#b9939a",
+  "#F3F0E5",
+  "#EAE5D6",
+  "#DED6C1",
+  "#CFC4A8",
+  "#BDAE8C",
+  "#A89572",
+  "#927D5E",
+  "#78664E",
 ];
 const hostOf = (url) => {
   try {

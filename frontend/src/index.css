@@ -42,8 +42,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, label:focus-within
 .sidebar { position: fixed; inset: var(--topbar-height) auto 0 0; z-index: 6; display: flex; flex-direction: column; width: var(--sidebar-width); padding: 22px 12px 16px; background: var(--sidebar); color: var(--sidebar-ink); transform: translateX(-100%); transition: transform .2s ease; }
 .sidebar-open .sidebar { transform: none; box-shadow: 8px 0 24px #49382c33; }
 .brand { display: flex; align-items: center; gap: 10px; margin: 0 0 28px 8px; color: var(--sidebar-ink); font-size: 19px; font-weight: 800; letter-spacing: -.5px; text-decoration: none; }
-.brand-mark { display: grid; place-items: center; width: 32px; height: 32px; overflow: hidden; border-radius: 10px; background: var(--coral); }
-.brand-logo-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-mark { display: grid; place-items: center; width: 32px; height: 32px; overflow: hidden; border-radius: 10px; background: #f7f4ea; }
+.brand-logo-image { display: block; width: 100%; height: 100%; object-fit: cover; transform: scale(1.5); }
 .side-label { margin: 0 0 8px 10px; color: var(--sidebar-muted); font-size: 12px; font-weight: 700; letter-spacing: 1px; }
 .side-nav { display: grid; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px; border-radius: 8px; color: var(--sidebar-ink); font-size: 15px; font-weight: 600; text-decoration: none; transition: background .15s ease; }
@@ -58,7 +58,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, label:focus-within
 .profile-row { display: flex; align-items: center; gap: 10px; padding: 16px 6px 2px; font-size: 13px; }
 .avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--coral); color: var(--navy); font-weight: 700; }
 .avatar-mascot { overflow: hidden; border-radius: 10px; }
-.avatar-mascot img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.avatar-mascot img { display: block; width: 100%; height: 100%; object-fit: cover; transform: scale(1.5); }
 .profile-row b, .profile-row small { display: block; }
 .profile-link { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; margin: -4px; padding: 4px; border-radius: 8px; color: inherit; text-decoration: none; transition: background .15s ease; }
 .profile-link:hover { background: #fffefa12; }
@@ -386,8 +386,8 @@ body:has(.alerts-drawer[open]) { overflow: hidden; }
 .onboarding-shell { display: flex; flex-direction: column; min-height: 100vh; padding: 0 clamp(22px, 7vw, 104px); overflow: hidden; background: radial-gradient(ellipse at 82% 48%, #f8edc9b8 0, #fffefa 43%, #fffefa 100%); }
 .onboarding-header { display: flex; align-items: center; justify-content: space-between; min-height: 82px; border-bottom: 1px solid #49382c18; }
 .onboarding-brand { display: flex; align-items: center; gap: 10px; color: var(--navy); font-size: 20px; font-weight: 850; letter-spacing: -.7px; text-decoration: none; }
-.onboarding-brand-mark { display: grid; place-items: center; width: 36px; height: 36px; overflow: hidden; border-radius: 13px; background: var(--coral); }
-.onboarding-brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.onboarding-brand-mark { display: grid; place-items: center; width: 36px; height: 36px; overflow: hidden; border-radius: 13px; background: #f7f4ea; }
+.onboarding-brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; transform: scale(1.5); }
 .onboarding-demo-tag { padding: 7px 11px; border: 1px solid #f8edc944; border-radius: 99px; color: #49382cb3; font-size: 12px; font-weight: 650; }
 .onboarding-demo-tag i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #f8edc9; }
 .onboarding-content { display: grid; flex: 1; grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr); align-items: center; gap: clamp(20px, 5vw, 75px); width: min(1120px, 100%); margin: 0 auto; padding: 48px 0 35px; }

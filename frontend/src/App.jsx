@@ -645,7 +645,7 @@ function App() {
       >
         <a className="brand" href={`#${PAGE_IDS[0]}`} aria-label="돈구마 대시보드로">
           <span className="brand-mark">
-            <img className="brand-logo-image" src="/dongguma-logo.svg" alt="" />
+            <img className="brand-logo-image" src="/dongguma-profile.png" alt="" />
           </span>
           <span>돈구마</span>
         </a>
@@ -684,7 +684,7 @@ function App() {
               onClick={closeSidebarOnTouch}
             >
               <span className="avatar avatar-mascot">
-                <img src="/dongguma-logo.svg" alt="" />
+                <img src="/dongguma-profile.png" alt="" />
               </span>
               <span className="profile-name">
                 <b>{user?.username}</b>
@@ -1032,7 +1032,7 @@ function AccountPage({ user, offline, statements, onReset, onLogout }) {
 
       <article className="account-card account-profile">
         <span className="avatar avatar-mascot account-avatar">
-          <img src="/dongguma-logo.svg" alt="" />
+          <img src="/dongguma-profile.png" alt="" />
         </span>
         <div className="account-profile-text">
           <b>{user?.username}</b>
@@ -1653,7 +1653,7 @@ function BrandHeader({ children }) {
     <header className="onboarding-header">
       <span className="onboarding-brand">
         <span className="onboarding-brand-mark">
-          <img src="/dongguma-logo.svg" alt="" />
+          <img src="/dongguma-profile.png" alt="" />
         </span>
         돈구마
       </span>

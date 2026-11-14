@@ -16,7 +16,7 @@ const LOCAL_SERVICES = [
     merchant: "NETFLIX.COM",
     service: "Netflix",
     plan: "스탠다드",
-    cancel: { via: "web", url: "https://help.netflix.com/en/node/407" },
+    cancel: { via: "web", url: "https://www.netflix.com/account/membership/cancel" },
   },
   {
     merchant: "APPLE.COM/BILL",
@@ -32,7 +32,7 @@ const LOCAL_SERVICES = [
     merchant: "쿠팡(와우멤버십)",
     service: "Coupang Wow",
     plan: "와우 멤버십",
-    cancel: { via: "web", url: "https://www.coupang.com/np/coupangwow" },
+    cancel: { via: "web", url: "https://loyalty.coupang.com/loyalty/management/home" },
   },
   {
     merchant: "GOOGLE*SPEAK",
@@ -50,7 +50,7 @@ const LOCAL_SERVICES = [
     plan: "Premium",
     cancel: {
       via: "web",
-      url: "https://www.spotify.com/account/subscription/",
+      url: "https://www.spotify.com/account/subscription/manage/",
     },
   },
   {
@@ -324,9 +324,18 @@ function useHoverSidebar() {
 
 function App() {
   const [result, setResult] = useState(null);
+  const [subscriptionSort, setSubscriptionSort] = useState("amount");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("dongguma:dismissed-alerts") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const showAlerts = () => setAlertsOpen(true);
   const [loading, setLoading] = useState(false);
   const [offlineDemo, setOfflineDemo] = useState(false);
   // checking -> auth(로그인) -> onboarding(데이터 없음) | dashboard
@@ -581,8 +590,28 @@ function App() {
 
   const subscriptions = result?.subscriptions ?? [];
   const current = subscriptions.filter((s) => s.status !== "cancelled");
+  const sortedCurrent = [...current].sort((a, b) => {
+    if (subscriptionSort === "date") {
+      return (b.last_charge_date ?? "").localeCompare(a.last_charge_date ?? "");
+    }
+    if (subscriptionSort === "oldest") {
+      return (a.last_charge_date ?? "").localeCompare(b.last_charge_date ?? "");
+    }
+    return Number(b.amount ?? 0) - Number(a.amount ?? 0);
+  });
   const cancelled = subscriptions.filter((s) => s.status === "cancelled");
-  const alerts = result?.alerts ?? [];
+  const alertKey = (alert) =>
+    [alert.type, alert.merchant, alert.service, alert.amount, alert.date, alert.message].join("|");
+  const alerts = (result?.alerts ?? []).filter((alert) => !dismissedAlerts.includes(alertKey(alert)));
+  const dismissAlert = (alert) => {
+    const next = [...new Set([...dismissedAlerts, alertKey(alert)])];
+    setDismissedAlerts(next);
+    try {
+      localStorage.setItem("dongguma:dismissed-alerts", JSON.stringify(next));
+    } catch {
+      // 저장소를 사용할 수 없는 환경에서도 현재 화면에서는 숨긴다.
+    }
+  };
   const needsReview = current.filter((s) => s.confidence !== "high").length;
   const statements = result?.statements ?? [];
   const onlyDemo =
@@ -601,7 +630,6 @@ function App() {
 
   return (
     <div className={`app-shell${sidebar.open ? " sidebar-open" : ""}`}>
-      <div className="sidebar-hover-zone" aria-hidden="true" onMouseEnter={sidebar.show} />
       <aside
         className="sidebar"
         id="app-sidebar"
@@ -718,7 +746,7 @@ function App() {
               aria-haspopup="dialog"
               aria-expanded={alertsOpen}
               title="알림 보기"
-              onClick={() => setAlertsOpen(true)}
+              onClick={showAlerts}
             >
               <BellIcon />
               {alerts.length > 0 && <i />}
@@ -794,12 +822,16 @@ function App() {
             result && (
               <>
                 {showOn("insights") && (
-                  <AlertsSection alerts={alerts} onReview={() => goTo("subscriptions")} />
+                  <AlertsSection alerts={alerts} onReview={() => goTo("subscriptions")} onDismiss={dismissAlert} />
                 )}
 
                 {page === "overview" && (
                   <section className="summary-grid" aria-label="구독 요약">
-                    <article className="summary-card primary-summary">
+                    <a
+                      className="summary-card summary-card-link primary-summary"
+                      href="#subscriptions"
+                      aria-label="내 구독 목록에서 구독료 상세 보기"
+                    >
                       <div className="summary-label">
                         매달 나가는 구독료 <span className="mini-icon">₩</span>
                       </div>
@@ -810,7 +842,7 @@ function App() {
                       <div className="summary-decoration" aria-hidden="true">
                         ₩
                       </div>
-                    </article>
+                    </a>
                     <article className="summary-card">
                       <div className="summary-label">
                         구독 중 <span className="mini-icon blue-icon">◷</span>
@@ -825,7 +857,11 @@ function App() {
                           : "여러 결제처에서 모았어요"}
                       </div>
                     </article>
-                    <article className="summary-card coral-summary">
+                    <a
+                      className="summary-card summary-card-link coral-summary"
+                      href="#insights"
+                      aria-label="확인할 항목 페이지 열기"
+                    >
                       <div className="summary-label">
                         확인할 항목 <span className="mini-icon coral-icon">!</span>
                       </div>
@@ -834,7 +870,7 @@ function App() {
                         <small>건</small>
                       </strong>
                       <div className="summary-foot">실제 서비스를 확인해 주세요</div>
-                    </article>
+                    </a>
                   </section>
                 )}
 
@@ -849,7 +885,21 @@ function App() {
                         <p className="eyebrow">YOUR SUBSCRIPTIONS</p>
                         <h2>내 구독</h2>
                       </div>
-                      <span className="list-count">{current.length}개 서비스</span>
+                      <div className="subscription-heading-actions">
+                        <label className="subscription-sort">
+                          <span>정렬</span>
+                          <select
+                            aria-label="내 구독 정렬 기준"
+                            value={subscriptionSort}
+                            onChange={(event) => setSubscriptionSort(event.target.value)}
+                          >
+                            <option value="amount">결제액 순</option>
+                            <option value="date">최근 결제일 순</option>
+                            <option value="oldest">오래된 결제 순</option>
+                          </select>
+                        </label>
+                        <span className="list-count">{current.length}개 서비스</span>
+                      </div>
                     </div>
                     <section className="subscription-panel">
                       <div className="table-head">
@@ -862,7 +912,7 @@ function App() {
                       {current.length === 0 ? (
                         <div className="empty-state">아직 발견된 구독이 없어요.</div>
                       ) : (
-                        current.map((sub) => (
+                        sortedCurrent.map((sub) => (
                           <Subscription
                             key={`${sub.merchant}-${sub.amount}`}
                             sub={sub}
@@ -959,6 +1009,7 @@ function App() {
       <AlertsDrawer
         open={alertsOpen}
         alerts={alerts}
+        onDismiss={dismissAlert}
         onClose={() => setAlertsOpen(false)}
         onReview={() => {
           setAlertsOpen(false);
@@ -1200,7 +1251,7 @@ function CardIssuerGuide() {
   );
 }
 
-function AlertsSection({ alerts, onReview }) {
+function AlertsSection({ alerts, onReview, onDismiss }) {
   return (
     <section className="alerts-section" aria-label="알림">
       <div className="section-heading compact">
@@ -1210,12 +1261,12 @@ function AlertsSection({ alerts, onReview }) {
         </div>
         <span className="list-count">{alerts.length}건</span>
       </div>
-      <AlertList alerts={alerts} onReview={onReview} />
+      <AlertList alerts={alerts} onReview={onReview} onDismiss={onDismiss} />
     </section>
   );
 }
 
-function AlertList({ alerts, onReview }) {
+function AlertList({ alerts, onReview, onDismiss }) {
   if (alerts.length === 0)
     return (
       <div className="alert-card calm">
@@ -1239,9 +1290,19 @@ function AlertList({ alerts, onReview }) {
               </span>
               <b>{alert.message}</b>
             </div>
-            {alert.type === "needs_review" && (
+            {alert.type === "needs_review" ? (
               <button type="button" className="ghost-button" onClick={onReview}>
-                확인하기 →
+                확인하러 가기 →
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="alert-dismiss"
+                aria-label={`${alert.service} 알림 확인 및 닫기`}
+                title="확인했어요"
+                onClick={() => onDismiss(alert)}
+              >
+                ✓
               </button>
             )}
           </li>
@@ -1252,7 +1313,7 @@ function AlertList({ alerts, onReview }) {
 }
 
 // 네이티브 <dialog> 라서 포커스 가두기·Esc 닫기·닫은 뒤 포커스 복귀를 브라우저가 처리한다.
-function AlertsDrawer({ open, alerts, onClose, onReview }) {
+function AlertsDrawer({ open, alerts, onClose, onReview, onDismiss }) {
   const dialogRef = useRef(null);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1281,7 +1342,7 @@ function AlertsDrawer({ open, alerts, onClose, onReview }) {
           </button>
         </header>
         <div className="alerts-drawer-body">
-          <AlertList alerts={alerts} onReview={onReview} />
+          <AlertList alerts={alerts} onReview={onReview} onDismiss={onDismiss} />
         </div>
       </div>
     </dialog>
@@ -1799,10 +1860,6 @@ function CancelAction({ cancel }) {
       <a href={cancel.url} target="_blank" rel="noreferrer" className="cancel-link">
         해지하러 가기 <span>↗</span>
       </a>
-      <small className="cancel-host">
-        {cancel.host}
-        {cancel.verified && <em> · 공식 경로</em>}
-      </small>
     </span>
   );
 }
@@ -1812,6 +1869,13 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
   const confirmed = sub.confidence === "high";
   const title = sub.service || sub.merchant;
   const lapsed = sub.status === "lapsed";
+  const primaryStatus = sub.recharged_after_cancel
+    ? { className: "danger", label: "해지 후 결제됨" }
+    : lapsed
+      ? { className: "lapsed", label: sub.missed_cycles > 1 ? "결제 끊김" : "결제 확인 안 됨" }
+      : confirmed
+        ? { className: "confirmed", label: "서비스 확인됨" }
+        : { className: "review", label: "출처 확인 필요" };
   return (
     <article className={`subscription-item${open ? " open" : ""}`}>
       <div className="subscription-row">
@@ -1824,11 +1888,6 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
           <ServiceMark name={title} />
           <span className="service-text">
             <b>{title}</b>
-            <small>
-              {sub.service !== sub.merchant
-                ? `명세서 표기 · ${sub.merchant}`
-                : sub.plan || "정기 구독"}
-            </small>
           </span>
           <span className="chevron" aria-hidden="true">
             ⌄
@@ -1836,34 +1895,15 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
         </button>
         <div className="amount-cell">
           <b>{won(sub.amount)}</b>
-          <small>/{CYCLE_LABELS[sub.cycle] || "월"}</small>
-          {sub.share != null && <span className="share-chip">구독료의 {sub.share}%</span>}
         </div>
         <div className="date-cell">
           <b>{dateLabel(sub.last_charge_date)}</b>
-          <small className={lapsed ? "overdue" : ""}>
-            {lapsed
-              ? `예상일 ${dateLabel(sub.next_payment_date)} 지남`
-              : `다음 결제 예상 · ${dateLabel(sub.next_payment_date)}`}
-          </small>
         </div>
         <div className="status-cell">
-          <span className={`status-badge ${confirmed ? "confirmed" : "review"}`}>
+          <span className={`status-badge ${primaryStatus.className}`}>
             <i />
-            {confirmed ? "서비스 확인됨" : "출처 확인 필요"}
+            {primaryStatus.label}
           </span>
-          {lapsed && (
-            <span className="status-badge lapsed">
-              <i />
-              {sub.missed_cycles > 1 ? "결제 끊김" : "결제 확인 안 됨"}
-            </span>
-          )}
-          {sub.recharged_after_cancel && (
-            <span className="status-badge danger">
-              <i />
-              해지 후 결제됨
-            </span>
-          )}
         </div>
         <div className="row-action">
           {confirmed ? (
@@ -1873,16 +1913,25 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
           )}
         </div>
       </div>
-      {open && <SubscriptionDetail sub={sub} onStatus={onStatus} />}
+      {open && <SubscriptionDetail sub={sub} onStatus={onStatus} onConfirmed={onConfirmed} offline={offline} />}
     </article>
   );
 }
 
-function SubscriptionDetail({ sub, onStatus }) {
+function SubscriptionDetail({ sub, onStatus, onConfirmed, offline }) {
+  const [editingService, setEditingService] = useState(false);
   const history = sub.price_history ?? [];
   return (
     <div className="subscription-detail">
       <dl className="detail-grid">
+        <div>
+          <dt>명세서 표기</dt>
+          <dd>{sub.merchant}</dd>
+        </div>
+        <div>
+          <dt>결제 주기</dt>
+          <dd>{CYCLE_LABELS[sub.cycle] || "월"}</dd>
+        </div>
         <div>
           <dt>첫 결제</dt>
           <dd>{fullDate(sub.first_charge_date)}</dd>
@@ -1951,26 +2000,84 @@ function SubscriptionDetail({ sub, onStatus }) {
           )}
         </div>
       </div>
+      {editingService && (
+        <div className="service-edit-panel">
+          <h3>서비스명 수정</h3>
+          <p>정식 서비스 후보를 선택하거나, 올바른 이름을 입력해 저장하세요.</p>
+          <ConfirmService
+            key={`${sub.merchant}-${sub.amount}-${sub.service}`}
+            sub={sub}
+            initialValue={sub.service}
+            hideInferredCandidates
+            offline={offline}
+            onResult={onConfirmed}
+            onSaved={() => setEditingService(false)}
+          />
+        </div>
+      )}
       <div className="detail-actions">
         <span>
           이미 해지했다면 표시해 두세요. 다음 명세서를 올리기 전에도 목록과 합계에서
           빠지고, 나중에 다시 결제되면 알려드려요.
         </span>
-        <button type="button" className="ghost-button" onClick={() => onStatus(sub, "cancelled")}>
-          해지했어요
-        </button>
+        <div className="detail-action-buttons">
+          {sub.confidence === "high" && (
+            <button type="button" className="ghost-button" onClick={() => setEditingService((value) => !value)}>
+              {editingService ? "수정 닫기" : "서비스명 수정"}
+            </button>
+          )}
+          <button type="button" className="ghost-button" onClick={() => onStatus(sub, "cancelled")}>
+            해지했어요
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function ConfirmService({ sub, onResult, offline }) {
+function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferredCandidates = false, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const candidates = useMemo(() => sub.candidates ?? [], [sub.candidates]);
+  const [serviceName, setServiceName] = useState(initialValue);
+  const [serviceMatches, setServiceMatches] = useState([]);
+  const [searchingMatches, setSearchingMatches] = useState(false);
+  const candidates = useMemo(() => (hideInferredCandidates ? [] : sub.candidates ?? []), [hideInferredCandidates, sub.candidates]);
+  const normalizedTypedName = serviceName.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
+  const hasExactCatalogMatch = serviceMatches.some(
+    (item) => item.service.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "") === normalizedTypedName,
+  );
+  const mustChooseCatalogMatch = serviceMatches.length > 0 && !hasExactCatalogMatch;
+  useEffect(() => {
+    const query = serviceName.trim();
+    if (offline || query.length < 2) {
+      setServiceMatches([]);
+      setSearchingMatches(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchingMatches(true);
+      try {
+        const result = await api(`/api/service-candidates/?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        });
+        setServiceMatches(result.candidates ?? []);
+      } catch (e) {
+        if (e.name !== "AbortError") setServiceMatches([]);
+      } finally {
+        if (!controller.signal.aborted) setSearchingMatches(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [serviceName, offline]);
+
   async function confirm(service) {
     if (offline) {
       onResult(service, sub);
+      onSaved?.();
       return;
     }
     setSaving(true);
@@ -1982,31 +2089,87 @@ function ConfirmService({ sub, onResult, offline }) {
           jsonPost({ merchant: sub.merchant, amount: sub.amount, service }),
         ),
       );
+      onSaved?.();
     } catch (e) {
       setError(e.message || "저장하지 못했어요");
     } finally {
       setSaving(false);
     }
   }
-  if (!candidates.length)
-    return <span className="no-action">후보를 찾지 못했어요</span>;
+  function saveTypedService(event) {
+    event.preventDefault();
+    const typed = serviceName.trim();
+    if (!typed) return;
+    const normalize = (value) => value.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
+    const exact = serviceMatches.find((item) => normalize(item.service) === normalize(typed));
+    if (serviceMatches.length && !exact) {
+      setError("비슷한 이름의 정식 서비스가 있어요. 아래 후보 중 하나를 선택해 주세요.");
+      return;
+    }
+    confirm(exact?.service ?? typed);
+  }
+
   return (
     <div className="candidate-wrap">
-      <span className="candidate-label">실제 서비스 후보</span>
-      <div className="candidate-list">
-        {candidates.slice(0, 2).map((candidate) => (
-          <button
-            key={candidate.service}
-            className="candidate-button"
-            type="button"
-            disabled={saving}
-            onClick={() => confirm(candidate.service)}
-          >
-            {candidate.service}
-            <span>선택</span>
-          </button>
-        ))}
-      </div>
+      {candidates.length > 0 && (
+        <>
+          <span className="candidate-label">서비스 후보 · 선택하면 저장돼요</span>
+          <div className="candidate-list">
+            {candidates.slice(0, 3).map((candidate) => (
+              <button
+                key={candidate.service}
+                className="candidate-button"
+                type="button"
+                disabled={saving}
+                onClick={() => confirm(candidate.service)}
+              >
+                {candidate.service}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {serviceMatches.length > 0 && (
+        <>
+          <span className="candidate-label">입력한 이름과 비슷해요 · 정식 서비스 선택</span>
+          <div className="candidate-list">
+            {serviceMatches.slice(0, 3).map((candidate) => (
+              <button
+                key={candidate.service}
+                className="candidate-button"
+                type="button"
+                disabled={saving}
+                onClick={() => confirm(candidate.service)}
+              >
+                {candidate.service}
+                <span>{candidate.similarity}%</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <form
+        className="manual-service-form"
+        onSubmit={saveTypedService}
+      >
+        <input
+          aria-label={`${sub.merchant} 실제 서비스명`}
+          placeholder={searchingMatches ? "서비스 후보 찾는 중…" : "서비스명 입력"}
+          value={serviceName}
+          disabled={saving}
+          onChange={(event) => {
+            setServiceName(event.target.value);
+            setError("");
+          }}
+          maxLength={100}
+        />
+        <button className="candidate-button manual-service-submit" type="submit" disabled={saving || searchingMatches || mustChooseCatalogMatch || !serviceName.trim()}>
+          {saving ? "저장 중…" : searchingMatches ? "찾는 중…" : mustChooseCatalogMatch ? "후보 선택" : "직접 저장"}
+        </button>
+      </form>
+      {!candidates.length && !serviceMatches.length && !searchingMatches && serviceName.trim().length >= 2 && (
+        <small className="candidate-hint">등록된 가까운 서비스가 없어요. 직접 저장하면 해지 경로가 제공되지 않을 수 있어요.</small>
+      )}
       {error && <small className="error-text">{error}</small>}
     </div>
   );

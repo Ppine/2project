@@ -177,6 +177,17 @@ def test_confirm_alias_makes_charge_cancellable(client):
     assert client.post("/api/merchant-aliases/", {"merchant": "NICE페이"}, format="json").status_code == 400
 
 
+def test_service_candidate_search_corrects_typos_to_catalog_names(client):
+    response = client.get("/api/service-candidates/?q=netflx")
+    assert response.status_code == 200
+    assert response.json()["candidates"][0]["service"] == "Netflix"
+    assert response.json()["candidates"][0]["similarity"] >= 80
+
+    korean = client.get("/api/service-candidates/?q=%EB%84%B7%ED%94%8C%EB%A6%AD%EC%8A%A4")
+    assert korean.json()["candidates"][0]["service"] == "Netflix"
+    assert client.get("/api/service-candidates/?q=zzqqrandom").json()["candidates"] == []
+
+
 def test_reset_aliases_clears_confirmed_services(client):
     upload(client, DEMO_CSV.name, DEMO_CSV.read_bytes())
     client.post("/api/merchant-aliases/", {"merchant": "NICE페이", "amount": 9900, "service": "Disney+"},
@@ -315,6 +326,7 @@ DASHBOARD_WRITES = [
 
 def test_dashboard_requires_login(anon):
     assert anon.get("/api/statements/").status_code == 401
+    assert anon.get("/api/service-candidates/?q=netflx").status_code == 401
     for method, path in DASHBOARD_WRITES:
         response = getattr(anon, method)(path, {}, format="json")
         assert response.status_code == 401, (method, path)

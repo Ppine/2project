@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from analysis.clean import clean_merchant, describe_merchant
-from analysis.infer import analyze, explain_charge
+from analysis.infer import analyze, explain_charge, match_service_candidates
 from analysis.llm import GeminiInferer, GeminiStatementReader
 from analysis.notifications import parse_notification
 from analysis.parsers import UnsupportedFormat, parse_statement
@@ -222,6 +222,18 @@ class MerchantAliasView(DashboardView):
         """데모를 처음부터 다시 볼 수 있도록 사용자가 확인한 매핑을 모두 지운다."""
         deleted, _ = MerchantAlias.objects.filter(owner=request.user).delete()
         return Response({"deleted": deleted})
+
+
+class ServiceCandidateView(DashboardView):
+    """사용자가 입력한 서비스 이름과 가까운 요금표 정식 이름을 추천한다."""
+
+    def get(self, request):
+        query = request.query_params.get("q", "").strip()
+        if len(query) > 100:
+            return Response({"error": "bad_request", "detail": "서비스명은 100자 이내로 입력해 주세요."},
+                            status.HTTP_400_BAD_REQUEST)
+        candidates = match_service_candidates(query, ServiceFee.all_fees())
+        return Response({"candidates": candidates})
 
 
 class SubscriptionListView(APIView):

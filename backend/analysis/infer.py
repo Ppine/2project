@@ -7,8 +7,11 @@
 서비스라서, 이름과 관계없는 요금이 금액만 같다고 그 서비스로 보지 않는다 (예: 멜론 10,900원 ≠ Wavve).
 """
 
+from __future__ import annotations
+
 import csv
 import math
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -84,6 +87,58 @@ BRAND_ALIASES = {
     "네이버": "NAVER",
     "유튜브": "YOUTUBE",
 }
+
+# 서비스 요금표의 정식 이름과 사용자가 흔히 입력하는 한글 이름을 함께 비교한다.
+SERVICE_SEARCH_ALIASES = {
+    "Netflix": ("넷플릭스",),
+    "YouTube Premium": ("유튜브 프리미엄", "유튜브프리미엄"),
+    "YouTube Music": ("유튜브 뮤직", "유튜브뮤직"),
+    "Spotify": ("스포티파이",),
+    "Disney+": ("디즈니플러스", "디즈니 플러스"),
+    "TVING": ("티빙",),
+    "Wavve": ("웨이브",),
+    "WATCHA": ("왓챠",),
+    "Naver Plus Membership": ("네이버플러스멤버십", "네이버 플러스 멤버십"),
+    "Coupang Wow": ("쿠팡와우", "쿠팡 와우"),
+    "Millie Library": ("밀리의서재", "밀리의 서재"),
+    "Apple Music": ("애플뮤직", "애플 뮤직"),
+    "Apple TV+": ("애플티비플러스", "애플 티비 플러스"),
+    "ChatGPT": ("챗지피티", "챗gpt"),
+    "Claude": ("클로드",),
+    "Canva": ("캔바",),
+    "CapCut": ("캡컷",),
+}
+
+
+def match_service_candidates(query: str, fees: list[Fee], limit: int = 5) -> list[dict]:
+    """사용자 입력 오타를 요금표의 정식 서비스명으로 연결할 후보를 찾는다.
+
+    점수는 추천 순서를 정하는 데만 쓰고 자동 확정에는 사용하지 않는다. 반드시 사용자가
+    정식 이름을 선택해야 MerchantAlias에 저장되므로 해지 URL도 카탈로그의 이름으로 연결된다.
+    """
+    needle = normalize_name(query)
+    if len(needle) < 2:
+        return []
+
+    services = sorted({fee.service for fee in fees}, key=str.casefold)
+    ranked = []
+    for service in services:
+        labels = (service, *SERVICE_SEARCH_ALIASES.get(service, ()))
+        score = 0.0
+        for label in labels:
+            candidate = normalize_name(label)
+            if needle == candidate:
+                score = 1.0
+                break
+            if len(needle) >= 3 and (needle in candidate or candidate in needle):
+                score = max(score, 0.88)
+            score = max(score, SequenceMatcher(None, needle, candidate).ratio())
+        threshold = 0.72 if len(needle) < 5 else 0.56
+        if score >= threshold:
+            ranked.append((score, service))
+
+    ranked.sort(key=lambda item: (-item[0], item[1].casefold()))
+    return [{"service": service, "similarity": round(score * 100)} for score, service in ranked[:limit]]
 
 
 @dataclass(frozen=True)

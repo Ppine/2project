@@ -13,5 +13,6 @@ urlpatterns = [
     path("subscriptions/state/", api.SubscriptionStateView.as_view()),
     path("charges/explain/", api.ExplainChargeView.as_view()),
     path("notifications/", api.NotificationIngestView.as_view()),
+    path("service-candidates/", api.ServiceCandidateView.as_view()),
     path("merchant-aliases/", api.MerchantAliasView.as_view()),
 ]

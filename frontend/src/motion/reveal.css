@@ -1,0 +1,57 @@
+/* 스크롤 등장(Trigger-based) — 관찰은 움직이지 않는 그룹([data-reveal]),
+   움직임은 그 안의 카드들이 맡는다. transform 대신 translate 를 써서
+   카드의 hover transform 과 서로 덮어쓰지 않게 한다. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal] > * {
+    --reveal-delay: calc(200ms + var(--i, 0) * var(--reveal-step, 160ms));
+    transition:
+      opacity 700ms ease var(--reveal-delay),
+      translate 900ms cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay),
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  [data-reveal]:not([data-revealed]) > * {
+    opacity: 0;
+    translate: 0 40px;
+  }
+}
+
+/* 숫자가 올라가는 동안 자릿수 폭이 흔들리지 않게 한다. */
+.count-up { font-variant-numeric: tabular-nums; }
+
+/* 구독료 비중 파이(Scroll-linked): 차트가 화면을 지나는 진행률에 맞춰
+   마스크의 stroke 가 채워지며 파이가 드러난다. 위로 되감으면 다시 줄어든다. */
+.share-sweep { stroke-dashoffset: 0; }
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .share-pie { view-timeline: --pie block; }
+    .share-sweep {
+      animation: pie-sweep 1s linear both;
+      animation-timeline: --pie;
+      animation-range: cover 15% cover 50%;
+    }
+  }
+}
+@keyframes pie-sweep {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* 내 구독 목록(Scroll-linked): 행마다 자기 위치가 화면에 들어오는 진행률에 맞춰
+   올라온다. 스크롤을 빨리 내리면 빨리, 천천히 내리면 천천히, 멈추면 그 자리에서 멈춘다. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* overflow: hidden 은 패널을 스크롤 컨테이너로 만들어 view() 가 페이지가 아닌
+       패널을 기준으로 재게 된다. clip 은 모서리는 똑같이 자르면서 스크롤 컨테이너를 만들지 않는다. */
+    .subscription-panel { overflow: clip; }
+    .subscription-item {
+      animation: row-rise 1s linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 25%;
+    }
+  }
+}
+@keyframes row-rise {
+  from { opacity: 0; translate: 0 48px; }
+  to { opacity: 1; translate: none; }
+}

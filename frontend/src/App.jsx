@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import demoCsv from "../../data/demo_card_2026.csv?raw";
+import { useReveal } from "./motion/useReveal";
 
 const DEMO_FILENAME = "demo_card_2026.csv";
 const CYCLE_LABELS = { monthly: "월", yearly: "연" };
@@ -16,7 +17,10 @@ const LOCAL_SERVICES = [
     merchant: "NETFLIX.COM",
     service: "Netflix",
     plan: "스탠다드",
-    cancel: { via: "web", url: "https://www.netflix.com/account/membership/cancel" },
+    cancel: {
+      via: "web",
+      url: "https://www.netflix.com/account/membership/cancel",
+    },
   },
   {
     merchant: "APPLE.COM/BILL",
@@ -32,7 +36,10 @@ const LOCAL_SERVICES = [
     merchant: "쿠팡(와우멤버십)",
     service: "Coupang Wow",
     plan: "와우 멤버십",
-    cancel: { via: "web", url: "https://loyalty.coupang.com/loyalty/management/home" },
+    cancel: {
+      via: "web",
+      url: "https://loyalty.coupang.com/loyalty/management/home",
+    },
   },
   {
     merchant: "GOOGLE*SPEAK",
@@ -163,10 +170,7 @@ function finalizeLocal(base) {
 }
 
 function makeLocalDemo(csv) {
-  const [headerLine, ...lines] = csv
-    .replace(/^﻿/, "")
-    .trim()
-    .split(/\r?\n/);
+  const [headerLine, ...lines] = csv.replace(/^﻿/, "").trim().split(/\r?\n/);
   const headers = parseCsvLine(headerLine);
   const rows = lines.map((line) =>
     Object.fromEntries(
@@ -196,7 +200,12 @@ function makeLocalDemo(csv) {
       if (priceHistory.at(-1)?.amount !== charge.amount)
         priceHistory.push({ since: charge.date, amount: charge.amount });
     const cancel = definition.cancel
-      ? { steps: null, ...definition.cancel, host: hostOf(definition.cancel.url), verified: true }
+      ? {
+          steps: null,
+          ...definition.cancel,
+          host: hostOf(definition.cancel.url),
+          verified: true,
+        }
       : null;
     return [
       {
@@ -263,7 +272,11 @@ async function api(path, options = {}) {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = { ...(options.headers ?? {}) };
   if (method !== "GET") headers["X-CSRFToken"] = csrfToken();
-  const response = await fetch(path, { credentials: "same-origin", ...options, headers });
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    ...options,
+    headers,
+  });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) onAuthLost();
   if (!response.ok) {
@@ -330,7 +343,9 @@ function App() {
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [dismissedAlerts, setDismissedAlerts] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("dongguma:dismissed-alerts") || "[]");
+      return JSON.parse(
+        localStorage.getItem("dongguma:dismissed-alerts") || "[]",
+      );
     } catch {
       return [];
     }
@@ -345,6 +360,8 @@ function App() {
   const [connectStep, setConnectStep] = useState(0);
   const page = usePage();
   const sidebar = useHoverSidebar();
+  // 대시보드가 그려진 뒤, 그리고 페이지를 옮길 때마다 등장 대상을 다시 찾는다.
+  useReveal(screen === "dashboard" && result ? page : null);
 
   // 서버 응답에 statements가 없으면(구독 상태 변경 등) 기존 목록을 유지한다.
   function applyResult(data) {
@@ -423,7 +440,8 @@ function App() {
   }
 
   async function logout() {
-    if (!offlineDemo) await api("/api/auth/logout/", { method: "POST" }).catch(() => {});
+    if (!offlineDemo)
+      await api("/api/auth/logout/", { method: "POST" }).catch(() => {});
     setUser(null);
     setResult(null);
     setOfflineDemo(false);
@@ -522,9 +540,11 @@ function App() {
     if (!ok) return;
     // 내 계정의 명세서, 후보 선택 결과, 해지 표시를 모두 지워 처음 상태로 되돌립니다.
     await Promise.all(
-      ["/api/statements/", "/api/merchant-aliases/", "/api/subscriptions/state/"].map(
-        (path) => api(path, { method: "DELETE" }).catch(() => {}),
-      ),
+      [
+        "/api/statements/",
+        "/api/merchant-aliases/",
+        "/api/subscriptions/state/",
+      ].map((path) => api(path, { method: "DELETE" }).catch(() => {})),
     );
     setResult(null);
     setOfflineDemo(false);
@@ -601,8 +621,17 @@ function App() {
   });
   const cancelled = subscriptions.filter((s) => s.status === "cancelled");
   const alertKey = (alert) =>
-    [alert.type, alert.merchant, alert.service, alert.amount, alert.date, alert.message].join("|");
-  const alerts = (result?.alerts ?? []).filter((alert) => !dismissedAlerts.includes(alertKey(alert)));
+    [
+      alert.type,
+      alert.merchant,
+      alert.service,
+      alert.amount,
+      alert.date,
+      alert.message,
+    ].join("|");
+  const alerts = (result?.alerts ?? []).filter(
+    (alert) => !dismissedAlerts.includes(alertKey(alert)),
+  );
   const dismissAlert = (alert) => {
     const next = [...new Set([...dismissedAlerts, alertKey(alert)])];
     setDismissedAlerts(next);
@@ -615,7 +644,8 @@ function App() {
   const needsReview = current.filter((s) => s.confidence !== "high").length;
   const statements = result?.statements ?? [];
   const onlyDemo =
-    statements.length > 0 && statements.every((s) => s.filename === DEMO_FILENAME);
+    statements.length > 0 &&
+    statements.every((s) => s.filename === DEMO_FILENAME);
 
   // 대시보드는 모든 섹션을 모아 보여 주고, 각 탭은 자기 섹션만 보여 준다.
   const showOn = (id) => page === PAGE_IDS[0] || page === id;
@@ -639,13 +669,24 @@ function App() {
           if (e.target.matches(":focus-visible")) sidebar.show(); // 키보드 Tab 으로 들어올 때
         }}
         onBlur={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget) && !e.currentTarget.matches(":hover"))
+          if (
+            !e.currentTarget.contains(e.relatedTarget) &&
+            !e.currentTarget.matches(":hover")
+          )
             sidebar.hideSoon();
         }}
       >
-        <a className="brand" href={`#${PAGE_IDS[0]}`} aria-label="돈구마 대시보드로">
+        <a
+          className="brand"
+          href={`#${PAGE_IDS[0]}`}
+          aria-label="돈구마 대시보드로"
+        >
           <span className="brand-mark">
-            <img className="brand-logo-image" src="/dongguma-profile.png" alt="" />
+            <img
+              className="brand-logo-image"
+              src="/dongguma-profile.png"
+              alt=""
+            />
           </span>
           <span>돈구마</span>
         </a>
@@ -718,12 +759,17 @@ function App() {
               <SidebarIcon />
             </button>
             <div className="breadcrumb">
-              내 금융 <span>/</span> {PAGES.find((item) => item.id === page).label}
+              내 금융 <span>/</span>{" "}
+              {PAGES.find((item) => item.id === page).label}
             </div>
           </div>
           <div className="top-actions">
             {!offlineDemo && (
-              <button className="replay-onboarding" type="button" onClick={resetData}>
+              <button
+                className="replay-onboarding"
+                type="button"
+                onClick={resetData}
+              >
                 데이터 초기화
               </button>
             )}
@@ -733,10 +779,17 @@ function App() {
                 데모 데이터
               </span>
             )}
-            <a className="replay-onboarding top-logout" href={`#${ACCOUNT_PAGE.id}`}>
+            <a
+              className="replay-onboarding top-logout"
+              href={`#${ACCOUNT_PAGE.id}`}
+            >
               계정
             </a>
-            <button className="replay-onboarding top-logout" type="button" onClick={logout}>
+            <button
+              className="replay-onboarding top-logout"
+              type="button"
+              onClick={logout}
+            >
               로그아웃
             </button>
             <button
@@ -773,7 +826,11 @@ function App() {
                   />
                 </div>
                 <div className="hero-actions">
-                  <UploadButton loading={loading} onFiles={uploadStatements} primary />
+                  <UploadButton
+                    loading={loading}
+                    onFiles={uploadStatements}
+                    primary
+                  />
                   <CardIssuerGuide />
                 </div>
               </div>
@@ -822,11 +879,15 @@ function App() {
             result && (
               <>
                 {showOn("insights") && (
-                  <AlertsSection alerts={alerts} onReview={() => goTo("subscriptions")} onDismiss={dismissAlert} />
+                  <AlertsSection
+                    alerts={alerts}
+                    onReview={() => goTo("subscriptions")}
+                    onDismiss={dismissAlert}
+                  />
                 )}
 
                 {page === "overview" && (
-                  <section className="summary-grid" aria-label="구독 요약">
+                  <section className="summary-grid" aria-label="구독 요약" data-reveal>
                     <a
                       className="summary-card summary-card-link primary-summary"
                       href="#subscriptions"
@@ -835,7 +896,7 @@ function App() {
                       <div className="summary-label">
                         매달 나가는 구독료 <span className="mini-icon">₩</span>
                       </div>
-                      <strong>{won(result.monthly_total)}</strong>
+                      <CountUpWon value={result.monthly_total} />
                       <div className="summary-foot">
                         해지한 구독을 뺀 월 환산 금액
                       </div>
@@ -863,19 +924,25 @@ function App() {
                       aria-label="확인할 항목 페이지 열기"
                     >
                       <div className="summary-label">
-                        확인할 항목 <span className="mini-icon coral-icon">!</span>
+                        확인할 항목{" "}
+                        <span className="mini-icon coral-icon">!</span>
                       </div>
                       <strong>
                         {needsReview}
                         <small>건</small>
                       </strong>
-                      <div className="summary-foot">실제 서비스를 확인해 주세요</div>
+                      <div className="summary-foot">
+                        실제 서비스를 확인해 주세요
+                      </div>
                     </a>
                   </section>
                 )}
 
                 {showOn("analysis") && (
-                  <ShareAnalysis subscriptions={current} total={result.monthly_total} />
+                  <ShareAnalysis
+                    subscriptions={current}
+                    total={result.monthly_total}
+                  />
                 )}
 
                 {showOn("subscriptions") && (
@@ -891,14 +958,18 @@ function App() {
                           <select
                             aria-label="내 구독 정렬 기준"
                             value={subscriptionSort}
-                            onChange={(event) => setSubscriptionSort(event.target.value)}
+                            onChange={(event) =>
+                              setSubscriptionSort(event.target.value)
+                            }
                           >
                             <option value="amount">결제액 순</option>
                             <option value="date">최근 결제일 순</option>
                             <option value="oldest">오래된 결제 순</option>
                           </select>
                         </label>
-                        <span className="list-count">{current.length}개 서비스</span>
+                        <span className="list-count">
+                          {current.length}개 서비스
+                        </span>
                       </div>
                     </div>
                     <section className="subscription-panel">
@@ -910,7 +981,9 @@ function App() {
                         <span>해지</span>
                       </div>
                       {current.length === 0 ? (
-                        <div className="empty-state">아직 발견된 구독이 없어요.</div>
+                        <div className="empty-state">
+                          아직 발견된 구독이 없어요.
+                        </div>
                       ) : (
                         sortedCurrent.map((sub) => (
                           <Subscription
@@ -923,23 +996,29 @@ function App() {
                                 setResult((cur) =>
                                   finalizeLocal({
                                     ...cur,
-                                    subscriptions: cur.subscriptions.map((item) =>
-                                      item.merchant === target.merchant &&
-                                      item.amount === target.amount
-                                        ? {
-                                            ...item,
-                                            service: next,
-                                            confidence: "high",
-                                            candidates: [{ service: next, confidence: "high" }],
-                                            cancel: {
-                                              via: "app",
-                                              url: null,
-                                              host: null,
-                                              verified: false,
-                                              steps: `${next} 앱 > 설정 > 구독·멤버십 관리에서 해지`,
-                                            },
-                                          }
-                                        : item,
+                                    subscriptions: cur.subscriptions.map(
+                                      (item) =>
+                                        item.merchant === target.merchant &&
+                                        item.amount === target.amount
+                                          ? {
+                                              ...item,
+                                              service: next,
+                                              confidence: "high",
+                                              candidates: [
+                                                {
+                                                  service: next,
+                                                  confidence: "high",
+                                                },
+                                              ],
+                                              cancel: {
+                                                via: "app",
+                                                url: null,
+                                                host: null,
+                                                verified: false,
+                                                steps: `${next} 앱 > 설정 > 구독·멤버십 관리에서 해지`,
+                                              },
+                                            }
+                                          : item,
                                     ),
                                   }),
                                 );
@@ -953,22 +1032,29 @@ function App() {
                       <details className="cancelled-panel">
                         <summary>
                           해지한 구독 {cancelled.length}개{" "}
-                          <small>명세서를 다시 올려도 목록에 돌아오지 않아요</small>
+                          <small>
+                            명세서를 다시 올려도 목록에 돌아오지 않아요
+                          </small>
                         </summary>
                         {cancelled.map((sub) => (
-                          <div className="cancelled-row" key={`${sub.merchant}-${sub.amount}`}>
+                          <div
+                            className="cancelled-row"
+                            key={`${sub.merchant}-${sub.amount}`}
+                          >
                             <ServiceMark name={sub.service} />
                             <div className="service-text">
                               <b>{sub.service}</b>
                               <small>
-                                {fullDate(sub.status_changed_on)} 해지 표시 · 마지막 결제{" "}
-                                {fullDate(sub.last_charge_date)}
+                                {fullDate(sub.status_changed_on)} 해지 표시 ·
+                                마지막 결제 {fullDate(sub.last_charge_date)}
                               </small>
                             </div>
                             <button
                               type="button"
                               className="ghost-button"
-                              onClick={() => setSubscriptionStatus(sub, "active")}
+                              onClick={() =>
+                                setSubscriptionStatus(sub, "active")
+                              }
                             >
                               다시 구독 중이에요
                             </button>
@@ -994,11 +1080,14 @@ function App() {
                   <span className="footer-lock">⌑</span>{" "}
                   {onlyDemo || offlineDemo ? (
                     <>
-                      실제 금융 정보가 아닌 <b>{DEMO_FILENAME}</b> 가상 결제 내역을
-                      분석한 데모예요.
+                      실제 금융 정보가 아닌 <b>{DEMO_FILENAME}</b> 가상 결제
+                      내역을 분석한 데모예요.
                     </>
                   ) : (
-                    <>직접 올린 명세서 {statements.length}개의 결제 내역을 분석했어요.</>
+                    <>
+                      직접 올린 명세서 {statements.length}개의 결제 내역을
+                      분석했어요.
+                    </>
                   )}
                 </footer>
               </>
@@ -1055,15 +1144,25 @@ function AccountPage({ user, offline, statements, onReset, onLogout }) {
       {offline ? (
         <article className="account-card">
           <h3>서버 연결이 필요해요</h3>
-          <p>비밀번호 변경과 데이터 초기화는 백엔드 서버를 켜고 로그인한 뒤 쓸 수 있어요.</p>
+          <p>
+            비밀번호 변경과 데이터 초기화는 백엔드 서버를 켜고 로그인한 뒤 쓸 수
+            있어요.
+          </p>
         </article>
       ) : (
         <>
           <PasswordForm username={user?.username} />
           <article className="account-card">
             <h3>데이터 초기화</h3>
-            <p>이 계정의 명세서, 확인한 서비스, 해지 표시를 모두 지워요. 지운 데이터는 되돌릴 수 없어요.</p>
-            <button type="button" className="ghost-button danger" onClick={onReset}>
+            <p>
+              이 계정의 명세서, 확인한 서비스, 해지 표시를 모두 지워요. 지운
+              데이터는 되돌릴 수 없어요.
+            </p>
+            <button
+              type="button"
+              className="ghost-button danger"
+              onClick={onReset}
+            >
               데이터 초기화
             </button>
           </article>
@@ -1072,7 +1171,11 @@ function AccountPage({ user, offline, statements, onReset, onLogout }) {
 
       <article className="account-card">
         <h3>로그아웃</h3>
-        <p>{offline ? "데모 화면을 닫고 로그인 화면으로 돌아가요." : "이 브라우저에서 로그아웃해요."}</p>
+        <p>
+          {offline
+            ? "데모 화면을 닫고 로그인 화면으로 돌아가요."
+            : "이 브라우저에서 로그아웃해요."}
+        </p>
         <button type="button" className="ghost-button" onClick={onLogout}>
           로그아웃
         </button>
@@ -1110,16 +1213,30 @@ function PasswordForm({ username }) {
       setDone(true);
     } catch (err) {
       if (err.data?.fields) setFields(err.data.fields);
-      else setError(isNetworkError(err) ? "서버에 연결하지 못했어요." : err.message);
+      else
+        setError(
+          isNetworkError(err) ? "서버에 연결하지 못했어요." : err.message,
+        );
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form className="account-card auth-card account-password" onSubmit={submit} noValidate>
+    <form
+      className="account-card auth-card account-password"
+      onSubmit={submit}
+      noValidate
+    >
       <h3>비밀번호 변경</h3>
-      <input type="text" name="username" autoComplete="username" value={username ?? ""} readOnly hidden />
+      <input
+        type="text"
+        name="username"
+        autoComplete="username"
+        value={username ?? ""}
+        readOnly
+        hidden
+      />
       <label>
         현재 비밀번호
         <input
@@ -1130,7 +1247,11 @@ function PasswordForm({ username }) {
           onChange={(e) => setCurrent(e.target.value)}
           aria-invalid={Boolean(fields.current_password)}
         />
-        {fields.current_password && <small className="field-error">{fields.current_password.join(" ")}</small>}
+        {fields.current_password && (
+          <small className="field-error">
+            {fields.current_password.join(" ")}
+          </small>
+        )}
       </label>
       <label>
         새 비밀번호
@@ -1158,7 +1279,9 @@ function PasswordForm({ username }) {
           onChange={(e) => setConfirm(e.target.value)}
           aria-invalid={Boolean(fields.confirm)}
         />
-        {fields.confirm && <small className="field-error">{fields.confirm.join(" ")}</small>}
+        {fields.confirm && (
+          <small className="field-error">{fields.confirm.join(" ")}</small>
+        )}
       </label>
       {error && (
         <p className="auth-error" role="alert">
@@ -1170,7 +1293,11 @@ function PasswordForm({ username }) {
           비밀번호를 바꿨어요. 다른 기기에서는 다시 로그인해야 해요.
         </p>
       )}
-      <button type="submit" className="ghost-button" disabled={busy || !current || !next || !confirm}>
+      <button
+        type="submit"
+        className="ghost-button"
+        disabled={busy || !current || !next || !confirm}
+      >
         {busy ? "바꾸는 중…" : "비밀번호 변경"}
       </button>
     </form>
@@ -1179,8 +1306,22 @@ function PasswordForm({ username }) {
 
 function SidebarIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect
+        x="3.5"
+        y="5"
+        width="17"
+        height="14"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
       <path d="M9.5 5v14" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
@@ -1188,7 +1329,13 @@ function SidebarIcon() {
 
 function BellIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
       <path
         d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16Z M10 20a2 2 0 0 0 4 0"
         stroke="currentColor"
@@ -1214,8 +1361,8 @@ function UploadButton({ loading, onFiles, primary }) {
           e.target.value = "";
         }}
       />
-      <span className={loading ? "spin" : ""}>{loading ? "↻" : "⇪"}</span> 내 명세서
-      올리기
+      <span className={loading ? "spin" : ""}>{loading ? "↻" : "⇪"}</span> 내
+      명세서 올리기
     </label>
   );
 }
@@ -1228,8 +1375,8 @@ function CardIssuerGuide() {
       </summary>
       <div className="issuer-menu">
         <p>
-          카드사 홈페이지 로그인 → <b>이용내역 조회</b> → 기간을 <b>최근 12개월</b>로
-          정하고 <b>엑셀/CSV 다운로드</b>
+          카드사 홈페이지 로그인 → <b>이용내역 조회</b> → 기간을{" "}
+          <b>최근 12개월</b>로 정하고 <b>엑셀/CSV 다운로드</b>
         </p>
         <ul>
           {CARD_ISSUERS.map((issuer) => (
@@ -1261,28 +1408,38 @@ function AlertsSection({ alerts, onReview, onDismiss }) {
         </div>
         <span className="list-count">{alerts.length}건</span>
       </div>
-      <AlertList alerts={alerts} onReview={onReview} onDismiss={onDismiss} />
+      <AlertList
+        alerts={alerts}
+        onReview={onReview}
+        onDismiss={onDismiss}
+        reveal
+      />
     </section>
   );
 }
 
-function AlertList({ alerts, onReview, onDismiss }) {
+function AlertList({ alerts, onReview, onDismiss, reveal = false }) {
   if (alerts.length === 0)
     return (
       <div className="alert-card calm">
         <span className="alert-icon">✓</span>
         <div>
           <b>새로 알릴 내용이 없어요</b>
-          <small>금액 변경이나 놓친 결제가 생기면 여기에 먼저 알려드릴게요.</small>
+          <small>
+            금액 변경이나 놓친 결제가 생기면 여기에 먼저 알려드릴게요.
+          </small>
         </div>
       </div>
     );
   return (
-    <ul className="alert-list">
+    <ul className="alert-list" data-reveal={reveal || undefined}>
       {alerts.map((alert, index) => {
         const meta = ALERT_META[alert.type] ?? ALERT_META.needs_review;
         return (
-          <li className={`alert-card ${meta.tone}`} key={`${alert.type}-${alert.merchant}-${alert.amount}-${index}`}>
+          <li
+            className={`alert-card ${meta.tone}`}
+            key={`${alert.type}-${alert.merchant}-${alert.amount}-${index}`}
+          >
             <span className="alert-icon">{meta.icon}</span>
             <div>
               <span className="alert-kicker">
@@ -1337,12 +1494,21 @@ function AlertsDrawer({ open, alerts, onClose, onReview, onDismiss }) {
             <h2 id="alerts-drawer-title">알림</h2>
           </div>
           <span className="list-count">{alerts.length}건</span>
-          <button type="button" className="alerts-drawer-close" aria-label="알림 닫기" onClick={onClose}>
+          <button
+            type="button"
+            className="alerts-drawer-close"
+            aria-label="알림 닫기"
+            onClick={onClose}
+          >
             ×
           </button>
         </header>
         <div className="alerts-drawer-body">
-          <AlertList alerts={alerts} onReview={onReview} onDismiss={onDismiss} />
+          <AlertList
+            alerts={alerts}
+            onReview={onReview}
+            onDismiss={onDismiss}
+          />
         </div>
       </div>
     </dialog>
@@ -1365,8 +1531,61 @@ function shareItems(subscriptions) {
   const sum = (field) => rest.reduce((total, item) => total + item[field], 0);
   return [
     ...items.slice(0, SHARE_COLORS.length - 1),
-    { key: "others", name: `기타 ${rest.length}개`, share: Math.round(sum("share") * 10) / 10, amount: sum("amount") },
+    {
+      key: "others",
+      name: `기타 ${rest.length}개`,
+      share: Math.round(sum("share") * 10) / 10,
+      amount: sum("amount"),
+    },
   ];
+}
+
+// 매달 나가는 구독료: 카드가 화면에 들어오면 0원에서 실제 금액까지 올라간다.
+function CountUpWon({ value }) {
+  const ref = useRef(null);
+  const played = useRef(false);
+  const [shown, setShown] = useState(() =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches ? value : 0,
+  );
+  useEffect(() => {
+    const el = ref.current;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 이미 한 번 재생했거나 모션 줄이기면, 바뀐 값을 바로 보여 준다.
+    if (!el || reduce || played.current) {
+      setShown(value);
+      return undefined;
+    }
+    let frame = 0;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer.disconnect();
+        played.current = true;
+        const start = performance.now() + 200; // 카드 등장 대기와 맞춘다
+        const tick = (now) => {
+          const t = Math.min(Math.max((now - start) / 1400, 0), 1);
+          setShown(Math.round(value * (1 - (1 - t) ** 3))); // easeOutCubic
+          if (t < 1) frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+      },
+      { rootMargin: "0px 0px -15% 0px" },
+    );
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      if (frame) {
+        played.current = true;
+        setShown(value);
+      }
+    };
+  }, [value]);
+  return (
+    <strong ref={ref} className="count-up">
+      {won(shown)}
+    </strong>
+  );
 }
 
 const PIE_SIZE = 220;
@@ -1383,6 +1602,7 @@ function pieSlicePath(from, to) {
 }
 
 function ShareAnalysis({ subscriptions, total }) {
+  const maskId = useId();
   const [active, setActive] = useState(null);
   const [tip, setTip] = useState(null);
   const items = shareItems(subscriptions);
@@ -1390,11 +1610,21 @@ function ShareAnalysis({ subscriptions, total }) {
   const shareSum = items.reduce((sum, item) => sum + item.share, 0);
   const slices = items.reduce((list, item, i) => {
     const from = list.at(-1)?.to ?? 0;
-    return [...list, { ...item, from, to: from + item.share / shareSum, color: SHARE_COLORS[i] }];
+    return [
+      ...list,
+      {
+        ...item,
+        from,
+        to: from + item.share / shareSum,
+        color: SHARE_COLORS[i],
+      },
+    ];
   }, []);
   const dim = (key) => (active && active !== key ? " dimmed" : "");
   const activeItem = slices.find((slice) => slice.key === active);
   return (
+    // 바깥 div 는 자리만 지키는 관찰 대상, 안쪽 패널이 아래에서 올라온다.
+    <div data-reveal>
     <section className="analysis-panel">
       <div className="analysis-head">
         <div>
@@ -1414,6 +1644,22 @@ function ShareAnalysis({ subscriptions, total }) {
               setTip({ x: e.clientX - box.left, y: e.clientY - box.top });
             }}
           >
+            {/* 스크롤에 따라 12시 방향부터 시계 방향으로 파이를 드러내는 마스크 */}
+            <mask id={maskId}>
+              <circle
+                className="share-sweep"
+                cx={PIE_SIZE / 2}
+                cy={PIE_SIZE / 2}
+                r={PIE_SIZE / 4}
+                fill="none"
+                stroke="white"
+                strokeWidth={PIE_SIZE / 2}
+                pathLength="100"
+                strokeDasharray="100 100"
+                transform={`rotate(-90 ${PIE_SIZE / 2} ${PIE_SIZE / 2})`}
+              />
+            </mask>
+            <g mask={`url(#${maskId})`}>
             {slices.length === 1 ? (
               <circle
                 cx={PIE_SIZE / 2}
@@ -1433,6 +1679,7 @@ function ShareAnalysis({ subscriptions, total }) {
                 />
               ))
             )}
+            </g>
           </svg>
           {activeItem && tip && (
             <div className="share-tip" style={{ left: tip.x, top: tip.y }}>
@@ -1463,6 +1710,7 @@ function ShareAnalysis({ subscriptions, total }) {
         </ol>
       </div>
     </section>
+    </div>
   );
 }
 
@@ -1472,9 +1720,22 @@ function monthsBetween(start, end) {
   return (y2 - y1) * 12 + (m2 - m1) + 1;
 }
 
-function StatementsSection({ statements, offline, loading, onDelete, onFiles, onReloadDemo }) {
-  const starts = statements.map((s) => s.period_start).filter(Boolean).sort();
-  const ends = statements.map((s) => s.period_end).filter(Boolean).sort();
+function StatementsSection({
+  statements,
+  offline,
+  loading,
+  onDelete,
+  onFiles,
+  onReloadDemo,
+}) {
+  const starts = statements
+    .map((s) => s.period_start)
+    .filter(Boolean)
+    .sort();
+  const ends = statements
+    .map((s) => s.period_end)
+    .filter(Boolean)
+    .sort();
   const months = starts.length ? monthsBetween(starts[0], ends.at(-1)) : 0;
   return (
     <section className="statements-section">
@@ -1485,7 +1746,8 @@ function StatementsSection({ statements, offline, loading, onDelete, onFiles, on
         </div>
         {months > 0 && (
           <span className="list-count">
-            {fullDate(starts[0]).slice(0, 7)} ~ {fullDate(ends.at(-1)).slice(0, 7)} · {months}개월치
+            {fullDate(starts[0]).slice(0, 7)} ~{" "}
+            {fullDate(ends.at(-1)).slice(0, 7)} · {months}개월치
           </span>
         )}
       </div>
@@ -1526,8 +1788,14 @@ function StatementsSection({ statements, offline, loading, onDelete, onFiles, on
       </div>
       <div className="statement-actions">
         <UploadButton loading={loading} onFiles={onFiles} />
-        <button className="refresh-button" type="button" onClick={onReloadDemo} disabled={loading}>
-          <span className={loading ? "spin" : ""}>↻</span> 데모 명세서 다시 불러오기
+        <button
+          className="refresh-button"
+          type="button"
+          onClick={onReloadDemo}
+          disabled={loading}
+        >
+          <span className={loading ? "spin" : ""}>↻</span> 데모 명세서 다시
+          불러오기
         </button>
       </div>
     </section>
@@ -1540,13 +1808,24 @@ const CONNECT_STEPS = [
   "서비스와 다음 결제일을 정리하고 있어요",
 ];
 
-function Onboarding({ connecting, step, onConnect, username, onLogout, error }) {
+function Onboarding({
+  connecting,
+  step,
+  onConnect,
+  username,
+  onLogout,
+  error,
+}) {
   return (
     <main className="onboarding-shell">
       <BrandHeader>
         <span className="onboarding-user">
           <b>{username}</b>
-          <button type="button" className="replay-onboarding" onClick={onLogout}>
+          <button
+            type="button"
+            className="replay-onboarding"
+            onClick={onLogout}
+          >
             로그아웃
           </button>
         </span>
@@ -1610,7 +1889,8 @@ function Onboarding({ connecting, step, onConnect, username, onLogout, error }) 
             </p>
           )}
           <p className="onboarding-privacy">
-            <span>⌑</span> 실제 금융 계정 연결 없이 가상 데이터로 먼저 둘러볼 수 있어요.
+            <span>⌑</span> 실제 금융 계정 연결 없이 가상 데이터로 먼저 둘러볼 수
+            있어요.
           </p>
         </div>
         <div className="onboarding-art-wrap">
@@ -1677,11 +1957,18 @@ function AuthScreen({ onAuthenticated }) {
     setError("");
     setFields({});
     try {
-      const data = await api(`/api/auth/${mode}/`, jsonPost({ username, password }));
+      const data = await api(
+        `/api/auth/${mode}/`,
+        jsonPost({ username, password }),
+      );
       setPassword("");
       onAuthenticated(data.user);
     } catch (e) {
-      setError(isNetworkError(e) ? "서버에 연결하지 못했어요. 백엔드가 켜져 있는지 확인해 주세요." : e.message);
+      setError(
+        isNetworkError(e)
+          ? "서버에 연결하지 못했어요. 백엔드가 켜져 있는지 확인해 주세요."
+          : e.message,
+      );
       setFields(e.data?.fields ?? {});
     } finally {
       setBusy(false);
@@ -1699,7 +1986,9 @@ function AuthScreen({ onAuthenticated }) {
       <BrandHeader />
       <section className="onboarding-content">
         <div className="onboarding-copy">
-          <p className="onboarding-eyebrow">{signup ? "CREATE ACCOUNT" : "WELCOME BACK"}</p>
+          <p className="onboarding-eyebrow">
+            {signup ? "CREATE ACCOUNT" : "WELCOME BACK"}
+          </p>
           <h1>
             {signup ? (
               <>
@@ -1716,7 +2005,8 @@ function AuthScreen({ onAuthenticated }) {
             )}
           </h1>
           <p className="onboarding-description">
-            명세서와 구독 정보는 계정마다 따로 저장되고, 로그인한 본인만 볼 수 있어요.
+            명세서와 구독 정보는 계정마다 따로 저장되고, 로그인한 본인만 볼 수
+            있어요.
           </p>
           <form className="auth-card" onSubmit={submit} noValidate>
             <label>
@@ -1731,7 +2021,11 @@ function AuthScreen({ onAuthenticated }) {
                 maxLength={30}
                 aria-invalid={Boolean(fields.username)}
               />
-              {fields.username && <small className="field-error">{fields.username.join(" ")}</small>}
+              {fields.username && (
+                <small className="field-error">
+                  {fields.username.join(" ")}
+                </small>
+              )}
               {signup && !fields.username && (
                 <small>3~30자, 영문·숫자와 @ . + - _ 만 쓸 수 있어요.</small>
               )}
@@ -1747,9 +2041,15 @@ function AuthScreen({ onAuthenticated }) {
                 required
                 aria-invalid={Boolean(fields.password)}
               />
-              {fields.password && <small className="field-error">{fields.password.join(" ")}</small>}
+              {fields.password && (
+                <small className="field-error">
+                  {fields.password.join(" ")}
+                </small>
+              )}
               {signup && !fields.password && (
-                <small>8자 이상, 흔하거나 숫자로만 된 비밀번호는 쓸 수 없어요.</small>
+                <small>
+                  8자 이상, 흔하거나 숫자로만 된 비밀번호는 쓸 수 없어요.
+                </small>
               )}
             </label>
             {error && !Object.keys(fields).length && (
@@ -1757,8 +2057,13 @@ function AuthScreen({ onAuthenticated }) {
                 {error}
               </p>
             )}
-            <button className="connect-button" type="submit" disabled={busy || !username || !password}>
-              {busy ? "확인하는 중…" : signup ? "가입하고 시작하기" : "로그인"} <span>→</span>
+            <button
+              className="connect-button"
+              type="submit"
+              disabled={busy || !username || !password}
+            >
+              {busy ? "확인하는 중…" : signup ? "가입하고 시작하기" : "로그인"}{" "}
+              <span>→</span>
             </button>
           </form>
           <p className="auth-switch">
@@ -1827,7 +2132,11 @@ function ServiceMark({ name }) {
   if (logo && failed !== logo)
     return (
       <span className="service-mark has-logo">
-        <img src={`/logos/${logo}.png`} alt="" onError={() => setFailed(logo)} />
+        <img
+          src={`/logos/${logo}.png`}
+          alt=""
+          onError={() => setFailed(logo)}
+        />
       </span>
     );
   // 로고가 없는 서비스(PG사 표기 등)는 첫 글자로 표시한다.
@@ -1857,7 +2166,12 @@ function CancelAction({ cancel }) {
     );
   return (
     <span className="cancel-wrap">
-      <a href={cancel.url} target="_blank" rel="noreferrer" className="cancel-link">
+      <a
+        href={cancel.url}
+        target="_blank"
+        rel="noreferrer"
+        className="cancel-link"
+      >
         해지하러 가기 <span>↗</span>
       </a>
     </span>
@@ -1872,7 +2186,10 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
   const primaryStatus = sub.recharged_after_cancel
     ? { className: "danger", label: "해지 후 결제됨" }
     : lapsed
-      ? { className: "lapsed", label: sub.missed_cycles > 1 ? "결제 끊김" : "결제 확인 안 됨" }
+      ? {
+          className: "lapsed",
+          label: sub.missed_cycles > 1 ? "결제 끊김" : "결제 확인 안 됨",
+        }
       : confirmed
         ? { className: "confirmed", label: "서비스 확인됨" }
         : { className: "review", label: "출처 확인 필요" };
@@ -1909,11 +2226,22 @@ function Subscription({ sub, onConfirmed, onStatus, offline }) {
           {confirmed ? (
             <CancelAction cancel={sub.cancel} />
           ) : (
-            <ConfirmService sub={sub} offline={offline} onResult={onConfirmed} />
+            <ConfirmService
+              sub={sub}
+              offline={offline}
+              onResult={onConfirmed}
+            />
           )}
         </div>
       </div>
-      {open && <SubscriptionDetail sub={sub} onStatus={onStatus} onConfirmed={onConfirmed} offline={offline} />}
+      {open && (
+        <SubscriptionDetail
+          sub={sub}
+          onStatus={onStatus}
+          onConfirmed={onConfirmed}
+          offline={offline}
+        />
+      )}
     </article>
   );
 }
@@ -1981,7 +2309,9 @@ function SubscriptionDetail({ sub, onStatus, onConfirmed, offline }) {
                   </>
                 )}
               </p>
-              {sub.cancel.steps && <p className="detail-steps">{sub.cancel.steps}</p>}
+              {sub.cancel.steps && (
+                <p className="detail-steps">{sub.cancel.steps}</p>
+              )}
             </>
           ) : (
             <p className="detail-note">
@@ -2017,16 +2347,24 @@ function SubscriptionDetail({ sub, onStatus, onConfirmed, offline }) {
       )}
       <div className="detail-actions">
         <span>
-          이미 해지했다면 표시해 두세요. 다음 명세서를 올리기 전에도 목록과 합계에서
-          빠지고, 나중에 다시 결제되면 알려드려요.
+          이미 해지했다면 표시해 두세요. 다음 명세서를 올리기 전에도 목록과
+          합계에서 빠지고, 나중에 다시 결제되면 알려드려요.
         </span>
         <div className="detail-action-buttons">
           {sub.confidence === "high" && (
-            <button type="button" className="ghost-button" onClick={() => setEditingService((value) => !value)}>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setEditingService((value) => !value)}
+            >
               {editingService ? "수정 닫기" : "서비스명 수정"}
             </button>
           )}
-          <button type="button" className="ghost-button" onClick={() => onStatus(sub, "cancelled")}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onStatus(sub, "cancelled")}
+          >
             해지했어요
           </button>
         </div>
@@ -2035,18 +2373,33 @@ function SubscriptionDetail({ sub, onStatus, onConfirmed, offline }) {
   );
 }
 
-function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferredCandidates = false, onSaved }) {
+function ConfirmService({
+  sub,
+  onResult,
+  offline,
+  initialValue = "",
+  hideInferredCandidates = false,
+  onSaved,
+}) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [serviceName, setServiceName] = useState(initialValue);
   const [serviceMatches, setServiceMatches] = useState([]);
   const [searchingMatches, setSearchingMatches] = useState(false);
-  const candidates = useMemo(() => (hideInferredCandidates ? [] : sub.candidates ?? []), [hideInferredCandidates, sub.candidates]);
-  const normalizedTypedName = serviceName.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
-  const hasExactCatalogMatch = serviceMatches.some(
-    (item) => item.service.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "") === normalizedTypedName,
+  const candidates = useMemo(
+    () => (hideInferredCandidates ? [] : (sub.candidates ?? [])),
+    [hideInferredCandidates, sub.candidates],
   );
-  const mustChooseCatalogMatch = serviceMatches.length > 0 && !hasExactCatalogMatch;
+  const normalizedTypedName = serviceName
+    .toLocaleLowerCase()
+    .replace(/[^0-9a-z가-힣]/g, "");
+  const hasExactCatalogMatch = serviceMatches.some(
+    (item) =>
+      item.service.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "") ===
+      normalizedTypedName,
+  );
+  const mustChooseCatalogMatch =
+    serviceMatches.length > 0 && !hasExactCatalogMatch;
   useEffect(() => {
     const query = serviceName.trim();
     if (offline || query.length < 2) {
@@ -2058,9 +2411,12 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
     const timer = window.setTimeout(async () => {
       setSearchingMatches(true);
       try {
-        const result = await api(`/api/service-candidates/?q=${encodeURIComponent(query)}`, {
-          signal: controller.signal,
-        });
+        const result = await api(
+          `/api/service-candidates/?q=${encodeURIComponent(query)}`,
+          {
+            signal: controller.signal,
+          },
+        );
         setServiceMatches(result.candidates ?? []);
       } catch (e) {
         if (e.name !== "AbortError") setServiceMatches([]);
@@ -2100,10 +2456,15 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
     event.preventDefault();
     const typed = serviceName.trim();
     if (!typed) return;
-    const normalize = (value) => value.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
-    const exact = serviceMatches.find((item) => normalize(item.service) === normalize(typed));
+    const normalize = (value) =>
+      value.toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
+    const exact = serviceMatches.find(
+      (item) => normalize(item.service) === normalize(typed),
+    );
     if (serviceMatches.length && !exact) {
-      setError("비슷한 이름의 정식 서비스가 있어요. 아래 후보 중 하나를 선택해 주세요.");
+      setError(
+        "비슷한 이름의 정식 서비스가 있어요. 아래 후보 중 하나를 선택해 주세요.",
+      );
       return;
     }
     confirm(exact?.service ?? typed);
@@ -2113,7 +2474,9 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
     <div className="candidate-wrap">
       {candidates.length > 0 && (
         <>
-          <span className="candidate-label">서비스 후보 · 선택하면 저장돼요</span>
+          <span className="candidate-label">
+            서비스 후보 · 선택하면 저장돼요
+          </span>
           <div className="candidate-list">
             {candidates.slice(0, 3).map((candidate) => (
               <button
@@ -2131,7 +2494,9 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
       )}
       {serviceMatches.length > 0 && (
         <>
-          <span className="candidate-label">입력한 이름과 비슷해요 · 정식 서비스 선택</span>
+          <span className="candidate-label">
+            입력한 이름과 비슷해요 · 정식 서비스 선택
+          </span>
           <div className="candidate-list">
             {serviceMatches.slice(0, 3).map((candidate) => (
               <button
@@ -2148,13 +2513,12 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
           </div>
         </>
       )}
-      <form
-        className="manual-service-form"
-        onSubmit={saveTypedService}
-      >
+      <form className="manual-service-form" onSubmit={saveTypedService}>
         <input
           aria-label={`${sub.merchant} 실제 서비스명`}
-          placeholder={searchingMatches ? "서비스 후보 찾는 중…" : "서비스명 입력"}
+          placeholder={
+            searchingMatches ? "서비스 후보 찾는 중…" : "서비스명 입력"
+          }
           value={serviceName}
           disabled={saving}
           onChange={(event) => {
@@ -2163,13 +2527,34 @@ function ConfirmService({ sub, onResult, offline, initialValue = "", hideInferre
           }}
           maxLength={100}
         />
-        <button className="candidate-button manual-service-submit" type="submit" disabled={saving || searchingMatches || mustChooseCatalogMatch || !serviceName.trim()}>
-          {saving ? "저장 중…" : searchingMatches ? "찾는 중…" : mustChooseCatalogMatch ? "후보 선택" : "직접 저장"}
+        <button
+          className="candidate-button manual-service-submit"
+          type="submit"
+          disabled={
+            saving ||
+            searchingMatches ||
+            mustChooseCatalogMatch ||
+            !serviceName.trim()
+          }
+        >
+          {saving
+            ? "저장 중…"
+            : searchingMatches
+              ? "찾는 중…"
+              : mustChooseCatalogMatch
+                ? "후보 선택"
+                : "직접 저장"}
         </button>
       </form>
-      {!candidates.length && !serviceMatches.length && !searchingMatches && serviceName.trim().length >= 2 && (
-        <small className="candidate-hint">등록된 가까운 서비스가 없어요. 직접 저장하면 해지 경로가 제공되지 않을 수 있어요.</small>
-      )}
+      {!candidates.length &&
+        !serviceMatches.length &&
+        !searchingMatches &&
+        serviceName.trim().length >= 2 && (
+          <small className="candidate-hint">
+            등록된 가까운 서비스가 없어요. 직접 저장하면 해지 경로가 제공되지
+            않을 수 있어요.
+          </small>
+        )}
       {error && <small className="error-text">{error}</small>}
     </div>
   );
